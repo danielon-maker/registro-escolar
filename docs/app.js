@@ -515,16 +515,24 @@
     openModal(html);
   }
 
+  /** Desglose por materia: cuánto aportó cada parte, en porcentaje (la suma de la columna = calificación × 10). */
   function desgloseMaterias(f, R, w) {
-    var html = '';
+    var pct = function (pts) { return (Math.round(pts * 100) / 10) + '%'; };
+    var fila = function (nombre, peso, detalle, pts) {
+      return '<tr><td class="left">' + nombre + '</td><td>' + detalle + '</td><td><b>' + pct(pts) + '</b> <span class="muted">/ ' + peso + '</span></td></tr>';
+    };
+    var html = '<p class="muted small">Cada parte muestra cuánto porcentaje obtuvo de lo que vale. La suma es la calificación de la materia.</p>';
     CAMPOS().forEach(function (c) {
       var x = f.campos[c.id];
-      html += '<div class="card" style="background:#faf9ff"><div class="row"><b class="grow">' + c.nombre + '</b>' + gradeHtml(x.cal) + '</div><table style="margin-top:6px"><tbody>' +
-        '<tr><td class="left">Examen (' + pctEf(w.examen, c.id) + ')</td><td>' + (x.examen.reactivos == null ? 'Sin examen' : x.examen.aciertos == null ? 'Faltó' : x.examen.aciertos + '/' + x.examen.reactivos) + '</td><td>' + x.examen.pts.toFixed(2) + '</td></tr>' +
-        '<tr><td class="left">Trabajos (' + pctEf(w.trabajos, c.id) + ')</td><td>' + fmt1(x.trabajos.hechos).replace('.0', '') + '/' + x.trabajos.posibles + '</td><td>' + x.trabajos.pts.toFixed(2) + '</td></tr>' +
-        '<tr><td class="left">Asistencia (' + pctEf(w.asistencia, c.id) + ')</td><td>' + f.asis.asistio + '/' + f.asis.posibles + '</td><td>' + x.asistencia.pts.toFixed(2) + '</td></tr>' +
-        '<tr><td class="left">Disciplina (' + pctEf(w.disciplina, c.id) + ')</td><td>' + (f.disc.puntos == null ? '—' : f.disc.puntos + '/' + f.disc.max) + '</td><td>' + x.disciplina.pts.toFixed(2) + '</td></tr>' +
-        conceptosDe(c.id).map(function (k) { var e = x.extras[k.clave]; return '<tr><td class="left">' + esc(k.nombre) + ' (' + pctEf(k.peso, c.id) + ')</td><td>' + (e.valor == null ? '—' : e.valor + '/' + e.max) + '</td><td>' + e.pts.toFixed(2) + '</td></tr>'; }).join('') +
+      html += '<div class="card" style="background:#faf9ff"><div class="row"><b class="grow">' + c.nombre + '</b>' + gradeHtml(x.cal) + '</div>';
+      if (x.cal == null) { html += '<p class="muted small" style="margin:6px 0 0">Sin examen ni trabajos en este trimestre; no se califica.</p></div>'; return; }
+      html += '<table style="margin-top:6px"><thead><tr><th class="left">Parte</th><th>Obtuvo</th><th>Aporta</th></tr></thead><tbody>' +
+        fila('Examen', pctEf(w.examen, c.id), x.examen.reactivos == null ? 'Sin examen' : x.examen.aciertos == null ? 'Faltó' : x.examen.aciertos + '/' + x.examen.reactivos, x.examen.pts) +
+        fila('Trabajos', pctEf(w.trabajos, c.id), fmt1(x.trabajos.hechos).replace('.0', '') + '/' + x.trabajos.posibles, x.trabajos.pts) +
+        fila('Asistencia', pctEf(w.asistencia, c.id), f.asis.asistio + '/' + f.asis.posibles, x.asistencia.pts) +
+        fila('Disciplina', pctEf(w.disciplina, c.id), f.disc.puntos == null ? '—' : f.disc.puntos + '/' + f.disc.max, x.disciplina.pts) +
+        conceptosDe(c.id).map(function (k) { var e = x.extras[k.clave]; return fila(esc(k.nombre), pctEf(k.peso, c.id), e.valor == null ? '—' : e.valor + '/' + e.max, e.pts); }).join('') +
+        '<tr><td class="left"><b>Total</b></td><td></td><td><b>' + pct(x.cal) + '</b> <span class="muted">/ 100%</span></td></tr>' +
         '</tbody></table></div>';
     });
     return html;

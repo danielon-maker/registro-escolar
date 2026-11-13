@@ -346,20 +346,18 @@
 
   function viewExamenes() {
     var X = S.ex, p = periodo();
+    if (X.campo === 'DISC') return chipsExamen(p) + viewDisciplina(true);
     X.campo = campoValido(X.campo);
     if (!X.campo) return '<div class="banner warn">Este grupo no tiene materias activas. Agrégalas en Más → Materias.</div>';
     if (X.tipo === 'trimestral' && !p) return '<div class="banner warn">Configura los periodos en Más → Periodos.</div>';
     cargarExamen();
-    var html = '<div class="chips" style="margin-bottom:8px">' +
-      '<button class="chip' + (X.tipo === 'diagnostico' ? ' active' : '') + '" data-act="ex-tipo" data-v="diagnostico">Diagnóstico</button>' +
-      '<button class="chip' + (X.tipo === 'trimestral' ? ' active' : '') + '" data-act="ex-tipo" data-v="trimestral">Examen ' + esc(p ? p.nombre : 'trimestral') + '</button></div>' +
-      campoChips(X.campo, 'ex-campo');
+    var html = chipsExamen(p);
     var r = Number(X.reactivos) || 0;
     var cals = alumnosActivos().map(function (a) { var v = X.valores[a.id]; return v === '' || !r ? null : Number(v) / r * 10; });
     var d = Calc.distribucion(cals);
     html += '<div class="card" style="margin-top:12px"><div class="row nowrap"><label class="field grow"><span>Número de reactivos (preguntas)</span><input type="number" min="1" inputmode="numeric" data-input="ex-reactivos" value="' + esc(X.reactivos) + '"></label></div>' +
       '<div class="muted small" style="margin-top:8px">Promedio: <b>' + fmt1(d.promedio) + '</b> · 6: ' + d.bajo + ' · 7-8: ' + d.medio + ' · 9-10: ' + d.alto + (X.existe ? '' : ' · <b style="color:var(--warn)">Sin capturar</b>') + '</div></div>';
-    html += '<p class="muted small">Escribe los aciertos. Déjalo vacío si el alumno faltó al examen.</p>';
+    html += '<div class="row" style="margin-bottom:8px"><p class="muted small grow" style="margin:0">Escribe los aciertos. Déjalo vacío si el alumno faltó al examen.</p><button class="btn" data-act="pegar-abrir" data-tipo="ex">📋 Pegar lista</button></div>';
     html += '<div class="list">' + alumnosActivos().map(function (a, i) {
       var v = X.valores[a.id];
       var cal = v === '' || !r ? null : Number(v) / r * 10;
@@ -369,6 +367,40 @@
     if (X.existe) html += '<div style="margin-top:14px"><button class="btn danger block" data-act="ex-eliminar">Eliminar este examen</button></div>';
     html += '<div class="sticky-actions"><div class="inner"><button class="btn primary" data-act="ex-guardar">Guardar examen</button></div></div>';
     return html;
+  }
+
+  function chipsExamen(p) {
+    var X = S.ex, disc = X.campo === 'DISC';
+    return (disc ? '' : '<div class="chips" style="margin-bottom:8px">' +
+      '<button class="chip' + (X.tipo === 'diagnostico' ? ' active' : '') + '" data-act="ex-tipo" data-v="diagnostico">Diagnóstico</button>' +
+      '<button class="chip' + (X.tipo === 'trimestral' ? ' active' : '') + '" data-act="ex-tipo" data-v="trimestral">Examen ' + esc(p ? p.nombre : 'trimestral') + '</button></div>') +
+      '<div class="chips">' + CAMPOS().map(function (c) {
+        return '<button class="chip' + (c.id === X.campo ? ' active' : '') + '" data-act="ex-campo" data-v="' + c.id + '">' + c.nombre + '</button>';
+      }).join('') + '<button class="chip' + (disc ? ' active' : '') + '" data-act="ex-campo" data-v="DISC">⭐ Disciplina</button></div>';
+  }
+
+  /** Ventana para pegar calificaciones desde Excel u otro lado. tipo: 'ex' | 'disc' */
+  function modalPegar(tipo) {
+    var max = tipo === 'ex' ? Number(S.ex.reactivos) : S.data.grupo.disciplinaMax;
+    if (tipo === 'ex' && !(max > 0)) return toast('Primero escribe el número de reactivos', true);
+    openModal('<div class="row"><h2 class="grow">Pegar ' + (tipo === 'ex' ? 'aciertos' : 'puntos de disciplina') + '</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div>' +
+      '<p class="muted small">Copia la columna desde Excel (o escribe un renglón por alumno) y pégala aquí. Puede ser:</p>' +
+      '<ul class="muted small" style="margin:0 0 8px;padding-left:18px"><li>Solo los números, en el orden de la lista. Un renglón vacío o “F” = ' + (tipo === 'ex' ? 'faltó' : 'sin dato') + '.</li><li>Número de lista y valor: <code>5 18</code></li><li>Nombre y valor: <code>Acosta Angel 18</code></li></ul>' +
+      '<textarea id="pegar-texto" style="min-height:180px;font-family:ui-monospace,monospace" placeholder="18&#10;16&#10;17&#10;…"></textarea>' +
+      '<div id="pegar-resultado" class="small" style="margin:8px 0"></div>' +
+      '<div class="row"><button class="btn grow" data-act="pegar-revisar" data-tipo="' + tipo + '" data-max="' + max + '">Revisar</button><button class="btn primary grow" data-act="pegar-aplicar" data-tipo="' + tipo + '" data-max="' + max + '" disabled>Llenar lista</button></div>' +
+      '<p class="muted small" style="margin-top:8px">Después de llenar la lista revisa los valores y toca <b>Guardar</b>.</p>');
+    setTimeout(function () { var t = document.getElementById('pegar-texto'); if (t) t.focus(); }, 50);
+  }
+
+  function revisarPegado(el) {
+    var res = Pegado.interpretar(document.getElementById('pegar-texto').value, alumnosActivos(), { max: Number(el.dataset.max) });
+    var out = document.getElementById('pegar-resultado');
+    out.innerHTML = '<div class="banner ' + (res.problemas.length ? 'warn' : 'ok') + '" style="margin:0"><b>' + res.asignados + ' de ' + alumnosActivos().length + ' alumnos</b> se llenarán' +
+      (res.modo === 'nombre' ? ' (buscando por nombre)' : ' (por orden de lista)') + '.' +
+      (res.problemas.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + res.problemas.slice(0, 8).map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + (res.problemas.length > 8 ? '<li>…y ' + (res.problemas.length - 8) + ' más</li>' : '') + '</ul>' : '') + '</div>';
+    document.querySelector('[data-act="pegar-aplicar"]').disabled = res.asignados === 0;
+    return res;
   }
 
   // ===================== Calificaciones =====================
@@ -383,13 +415,15 @@
     html += '<div class="muted small" style="margin-bottom:8px">' + esc(p.nombre) + ' · Examen ' + w.examen + '% · Trabajos ' + w.trabajos + '% · Asistencia ' + w.asistencia + '% · Disciplina ' + w.disciplina + '% · ' + R.posiblesAsis + ' días de clase</div>';
 
     var sinDisc = R.alumnos.filter(function (f) { return f.disc.puntos == null; }).length;
-    if (sinDisc) html += '<div class="banner warn small">' + sinDisc + ' alumnos sin puntos de disciplina en este periodo (cuentan como 0). Captúralos en Más → Disciplina.</div>';
+    if (sinDisc) html += '<div class="banner warn small">' + sinDisc + ' alumnos sin puntos de disciplina en este periodo (cuentan como 0). <a href="#" data-act="ir-disciplina">Capturar disciplina</a></div>';
 
     if (tab === 'TODOS') {
-      html += '<div class="table-wrap"><table><thead><tr><th>#</th><th class="left">Alumno</th>' + CAMPOS().map(function (c) { return '<th>' + c.nombre.slice(0, 4) + '</th>'; }).join('') + '<th>Prom.</th></tr></thead><tbody>' +
+      html += '<div class="table-wrap"><table><thead><tr><th>#</th><th class="left">Alumno</th>' + CAMPOS().map(function (c) { return '<th>' + c.nombre.slice(0, 4) + '</th>'; }).join('') + '<th title="Disciplina (puntos)">⭐ Disc.</th><th>Prom.</th></tr></thead><tbody>' +
         R.alumnos.map(function (f) {
+          var dp = f.disc.puntos;
           return '<tr class="clickable" data-act="cal-detalle" data-id="' + f.alumno.id + '"><td>' + f.alumno.num + '</td><td class="name">' + esc(f.alumno.nombre) + '</td>' +
-            CAMPOS().map(function (c) { return '<td>' + gradeHtml(f.campos[c.id].cal) + '</td>'; }).join('') + '<td>' + gradeHtml(f.promedio) + '</td></tr>';
+            CAMPOS().map(function (c) { return '<td>' + gradeHtml(f.campos[c.id].cal) + '</td>'; }).join('') +
+            '<td>' + (dp == null ? '<span class="muted">—</span>' : '<span class="g ' + nivel(dp / f.disc.max * 10) + '">' + dp + '</span>') + '</td><td>' + gradeHtml(f.promedio) + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     } else {
       var pc = R.porCampo[tab];
@@ -460,7 +494,7 @@
   }
   function back() { return '<button class="btn ghost" data-act="mas" data-v="" style="margin-bottom:8px">‹ Más</button>'; }
 
-  function viewDisciplina() {
+  function viewDisciplina(enExamenes) {
     var p = periodo();
     if (!p) return '<div class="banner warn">Configura los periodos primero.</div>';
     var D = S.disc, key = p.id + '|' + S.data.disciplina.length;
@@ -470,8 +504,9 @@
       D.key = key; S.dirty = false;
     }
     var max = S.data.grupo.disciplinaMax;
-    return '<h2>Disciplina · ' + esc(p.nombre) + '</h2><p class="muted small">Puntos de 0 a ' + max + '. Vale ' + S.data.grupo.pesos.disciplina + '% de cada campo formativo.</p>' +
-      '<div class="row" style="margin-bottom:10px"><button class="btn" data-act="disc-todos">Poner ' + max + ' a los vacíos</button></div>' +
+    return (enExamenes ? '<div style="margin-top:12px"></div>' : '<h2>Disciplina · ' + esc(p.nombre) + '</h2>') +
+      '<div class="banner info small">Disciplina de <b>' + esc(p.nombre) + '</b>: puntos de 0 a ' + max + '. No es una materia aparte: cuenta ' + S.data.grupo.pesos.disciplina + '% dentro de la calificación de <b>cada</b> materia.</div>' +
+      '<div class="row" style="margin-bottom:10px"><button class="btn" data-act="disc-todos">Poner ' + max + ' a los vacíos</button><button class="btn" data-act="pegar-abrir" data-tipo="disc">📋 Pegar lista</button></div>' +
       '<div class="list">' + alumnosActivos().map(function (a) {
         return '<div class="item"><span class="num">' + a.num + '</span><div class="name">' + esc(a.nombre) + '</div><input type="number" min="0" max="' + max + '" step="0.5" inputmode="decimal" data-input="disc" data-id="' + a.id + '" value="' + esc(D.valores[a.id]) + '"></div>';
       }).join('') + '</div><div class="sticky-actions"><div class="inner"><button class="btn primary" data-act="disc-guardar">Guardar disciplina</button></div></div>';
@@ -865,7 +900,7 @@
 
     // Exámenes
     'ex-tipo': function (el) { if (!confirmLeave()) return; S.ex.tipo = el.dataset.v; S.ex.key = null; render(); },
-    'ex-campo': function (el) { if (!confirmLeave()) return; S.ex.campo = el.dataset.v; S.ex.key = null; render(); },
+    'ex-campo': function (el) { if (!confirmLeave()) return; S.ex.campo = el.dataset.v; S.ex.key = null; S.disc.key = null; render(); },
     'ex-guardar': function (el) {
       var X = S.ex;
       if (!(Number(X.reactivos) > 0)) return toast('Escribe el número de reactivos', true);
@@ -880,6 +915,17 @@
       if (!ex || !confirm('¿Eliminar este examen y sus resultados?')) return;
       busy(el, api('deleteExam', { grupoId: S.grupoId, examenId: ex.id }), 'Examen eliminado').then(function () { S.dirty = false; S.ex.key = null; return refresh(); });
     },
+
+    'pegar-abrir': function (el) { modalPegar(el.dataset.tipo); },
+    'pegar-revisar': function (el) { revisarPegado(el); },
+    'pegar-aplicar': function (el) {
+      var res = revisarPegado(el);
+      var dest = el.dataset.tipo === 'ex' ? S.ex.valores : S.disc.valores;
+      Object.keys(res.valores).forEach(function (k) { dest[k] = res.valores[k]; });
+      S.dirty = true; closeModal(); render();
+      toast(res.asignados + ' alumnos llenados. Revisa y toca Guardar.');
+    },
+    'ir-disciplina': function () { if (!confirmLeave()) return; S.view = 'examenes'; S.ex.campo = 'DISC'; S.disc.key = null; render(); window.scrollTo(0, 0); },
 
     // Calificaciones
     'cal-tab': function (el) { S.cal.tab = el.dataset.v; render(); },

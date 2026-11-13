@@ -4,6 +4,11 @@
  */
 (function (root) {
   /** Materias activas del grupo: { id, nombre (corto), largo }. */
+  /** Conceptos extra de calificación del grupo (participación, proyecto…): { clave, nombre, peso, max, tipo: 'general'|'materia' }. */
+  function conceptos(d) {
+    return (d.conceptos || []).filter(function (k) { return k.activo !== false; });
+  }
+
   function campos(d) {
     return (d.materias || []).filter(function (m) { return m.activo; })
       .map(function (m) { return { id: m.clave, nombre: m.corto || m.nombre, largo: String(m.nombre).toUpperCase() }; });
@@ -14,7 +19,11 @@
 
   /** Índices rápidos sobre los datos crudos del grupo. */
   function indexar(d) {
-    var ix = { sinClase: {}, asis: {}, entregas: {}, resultados: {}, disciplina: {}, carga: {} };
+    var ix = { sinClase: {}, asis: {}, entregas: {}, resultados: {}, disciplina: {}, carga: {}, puntos: {} };
+    (d.puntos || []).forEach(function (r) {
+      var k = r[0] + '|' + r[1] + '|' + (r[2] || '');
+      (ix.puntos[k] = ix.puntos[k] || {})[r[3]] = r[4];
+    });
     d.diasSinClase.forEach(function (x) { ix.sinClase[x.fecha] = x.motivo || 'Sin clase'; });
     d.asistencia.forEach(function (r) { (ix.asis[r[0]] = ix.asis[r[0]] || {})[r[1]] = r[2]; });
     d.entregas.forEach(function (r) { (ix.entregas[r[0]] = ix.entregas[r[0]] || {})[r[1]] = r[2]; });
@@ -53,6 +62,7 @@
     var posiblesAsis = dias.length + (Number(cargaAsis.TOTAL) || 0);
 
     var CAMPOS = campos(d);
+    var EXTRAS = conceptos(d);
     var porCampo = {};
     CAMPOS.forEach(function (c) {
       var acts = d.actividades.filter(function (a) { return a.campo === c.id && inRange(a.fecha, p); });
@@ -89,12 +99,20 @@
         }
         // Materia sin examen ni trabajos en el periodo: no se califica (no baja el promedio)
         var sinDatos = !ex && pc.posibles === 0;
-        var cal = sinDatos ? null : (rEx * w.examen + rTrab * w.trabajos + rAsis * w.asistencia + rDisc * w.disciplina) / 10;
+        var extras = {}, sumaExtras = 0;
+        EXTRAS.forEach(function (k) {
+          var v = (ix.puntos[p.id + '|' + k.clave + '|' + (k.tipo === 'materia' ? c.id : '')] || {})[al.id];
+          var r = v == null ? 0 : v / k.max;
+          extras[k.clave] = { valor: v == null ? null : v, max: k.max, pts: r * k.peso / 10 };
+          sumaExtras += r * k.peso;
+        });
+        var cal = sinDatos ? null : (rEx * w.examen + rTrab * w.trabajos + rAsis * w.asistencia + rDisc * w.disciplina + sumaExtras) / 10;
         campos[c.id] = {
           examen: { reactivos: ex ? ex.reactivos : null, aciertos: aciertos, cal: ex && aciertos != null ? aciertos / ex.reactivos * 10 : null, pts: rEx * w.examen / 10 },
           trabajos: { hechos: hechos, posibles: pc.posibles, pts: rTrab * w.trabajos / 10 },
           asistencia: { pts: rAsis * w.asistencia / 10 },
           disciplina: { pts: rDisc * w.disciplina / 10 },
+          extras: extras,
           cal: cal
         };
         if (cal != null) { suma += cal; n++; }
@@ -112,7 +130,7 @@
     CAMPOS.forEach(function (c) { resumen[c.id] = distribucion(filas.map(function (f) { return f.campos[c.id].cal; })); });
     resumen.PROM = distribucion(filas.map(function (f) { return f.promedio; }));
 
-    return { campos: CAMPOS, periodo: p, dias: dias, posiblesAsis: posiblesAsis, porCampo: porCampo, alumnos: filas, resumen: resumen };
+    return { campos: CAMPOS, conceptos: EXTRAS, periodo: p, dias: dias, posiblesAsis: posiblesAsis, porCampo: porCampo, alumnos: filas, resumen: resumen };
   }
 
   /** Igual que el Excel: ≤6.49 → "6", 6.5–8.99 → "7-8", ≥9 → "9-10". */
@@ -152,7 +170,7 @@
     return m;
   }
 
-  var api = { campos: campos, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
+  var api = { campos: campos, conceptos: conceptos, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
     asistenciasPeriodo: asistenciasPeriodo, indexar: indexar, examenDe: examenDe };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Calc = api;
 })(this);

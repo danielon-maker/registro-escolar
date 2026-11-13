@@ -4,6 +4,9 @@
  */
 (function (root) {
   /** Materias activas del grupo: { id, nombre (corto), largo }. */
+  /** ¿El concepto se califica en esta materia? (sin materias elegidas = en todas) */
+  function aplicaEn(k, materia) { return !k.materias || !k.materias.length || k.materias.indexOf(materia) >= 0; }
+
   /** Conceptos extra de calificación del grupo (participación, proyecto…): { clave, nombre, peso, max, tipo: 'general'|'materia' }. */
   function conceptos(d) {
     return (d.conceptos || []).filter(function (k) { return k.activo !== false; });
@@ -99,19 +102,23 @@
         }
         // Materia sin examen ni trabajos en el periodo: no se califica (no baja el promedio)
         var sinDatos = !ex && pc.posibles === 0;
+        // Conceptos que no aplican en esta materia: su porcentaje se reparte proporcionalmente en lo demás
+        var denom = 100 - EXTRAS.reduce(function (s, k) { return s + (aplicaEn(k, c.id) ? 0 : k.peso); }, 0);
+        var f = denom > 0 ? 10 / denom : 0;
         var extras = {}, sumaExtras = 0;
         EXTRAS.forEach(function (k) {
+          if (!aplicaEn(k, c.id)) { extras[k.clave] = null; return; }
           var v = (ix.puntos[p.id + '|' + k.clave + '|' + (k.tipo === 'materia' ? c.id : '')] || {})[al.id];
           var r = v == null ? 0 : v / k.max;
-          extras[k.clave] = { valor: v == null ? null : v, max: k.max, pts: r * k.peso / 10 };
+          extras[k.clave] = { valor: v == null ? null : v, max: k.max, pts: r * k.peso * f, pesoEf: k.peso * f * 10 };
           sumaExtras += r * k.peso;
         });
-        var cal = sinDatos ? null : (rEx * w.examen + rTrab * w.trabajos + rAsis * w.asistencia + rDisc * w.disciplina + sumaExtras) / 10;
+        var cal = sinDatos ? null : (rEx * w.examen + rTrab * w.trabajos + rAsis * w.asistencia + rDisc * w.disciplina + sumaExtras) * f;
         campos[c.id] = {
-          examen: { reactivos: ex ? ex.reactivos : null, aciertos: aciertos, cal: ex && aciertos != null ? aciertos / ex.reactivos * 10 : null, pts: rEx * w.examen / 10 },
-          trabajos: { hechos: hechos, posibles: pc.posibles, pts: rTrab * w.trabajos / 10 },
-          asistencia: { pts: rAsis * w.asistencia / 10 },
-          disciplina: { pts: rDisc * w.disciplina / 10 },
+          examen: { reactivos: ex ? ex.reactivos : null, aciertos: aciertos, cal: ex && aciertos != null ? aciertos / ex.reactivos * 10 : null, pts: rEx * w.examen * f, pesoEf: w.examen * f * 10 },
+          trabajos: { hechos: hechos, posibles: pc.posibles, pts: rTrab * w.trabajos * f, pesoEf: w.trabajos * f * 10 },
+          asistencia: { pts: rAsis * w.asistencia * f, pesoEf: w.asistencia * f * 10 },
+          disciplina: { pts: rDisc * w.disciplina * f, pesoEf: w.disciplina * f * 10 },
           extras: extras,
           cal: cal
         };
@@ -146,6 +153,38 @@
     return r;
   }
 
+  /** Todo lo de un alumno: calificaciones por trimestre y, del periodo elegido, faltas, trabajos pendientes, exámenes y puntos. */
+  function resumenAlumno(d, alumnoId, periodoId) {
+    var ix = indexar(d);
+    var hoy = new Date(); var hoyIso = hoy.getFullYear() + '-' + ('0' + (hoy.getMonth() + 1)).slice(-2) + '-' + ('0' + hoy.getDate()).slice(-2);
+    var periodos = d.periodos.filter(function (p) { return p.inicio <= hoyIso; });
+    var porPeriodo = periodos.map(function (p) {
+      var R = calcular(d, p.id);
+      return { periodo: p, fila: R.alumnos.filter(function (f) { return f.alumno.id === alumnoId; })[0] || null, R: R };
+    });
+    var p = d.periodos.filter(function (x) { return x.id === periodoId; })[0];
+    var actual = porPeriodo.filter(function (x) { return x.periodo.id === periodoId; })[0];
+    var dias = p ? diasDeClase(d, ix, p) : [];
+    var asis = { F: [], R: [], J: [] };
+    dias.forEach(function (fch) { var e = (ix.asis[fch] || {})[alumnoId]; if (asis[e]) asis[e].push(fch); });
+    var pendientes = [];
+    if (p) campos(d).forEach(function (c) {
+      d.actividades.filter(function (a) { return a.campo === c.id && inRange(a.fecha, p); })
+        .sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; })
+        .forEach(function (a) {
+          var v = (ix.entregas[a.id] || {})[alumnoId];
+          if (v == null || Number(v) < 1) pendientes.push({ materia: c.nombre, titulo: a.titulo, fecha: a.fecha, valor: v == null ? 0 : Number(v) });
+        });
+    });
+    var diag = {};
+    campos(d).forEach(function (c) {
+      var ex = examenDe(d, null, c.id, 'diagnostico');
+      var ac = ex ? (ix.resultados[ex.id] || {})[alumnoId] : null;
+      diag[c.id] = ex ? { aciertos: ac == null ? null : ac, reactivos: ex.reactivos, cal: ac == null ? null : ac / ex.reactivos * 10 } : null;
+    });
+    return { porPeriodo: porPeriodo, actual: actual, faltas: asis.F, retardos: asis.R, justificadas: asis.J, pendientes: pendientes, diagnostico: diag };
+  }
+
   /** Resultados de un examen (diagnóstico o trimestral) por campo. */
   function resultadosExamen(d, tipo, periodoId) {
     var ix = indexar(d);
@@ -170,7 +209,7 @@
     return m;
   }
 
-  var api = { campos: campos, conceptos: conceptos, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
+  var api = { campos: campos, conceptos: conceptos, aplicaEn: aplicaEn, resumenAlumno: resumenAlumno, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
     asistenciasPeriodo: asistenciasPeriodo, indexar: indexar, examenDe: examenDe };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Calc = api;
 })(this);

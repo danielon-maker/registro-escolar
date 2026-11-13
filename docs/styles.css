@@ -116,3 +116,10 @@ tr.clickable { cursor: pointer; }
 .menu-list .item .ic { font-size: 1.25rem; width: 28px; text-align: center; }
 .badge { font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: var(--brand-2); color: var(--brand); font-weight: 600; }
 .badge.off { background: #eee; color: #888; }
+
+@media print {
+  .topbar, .bottomnav, .sticky-actions, .no-print, .toast, .btn { display: none !important; }
+  main { padding: 0; max-width: none; }
+  body { background: #fff; }
+  .card, .table-wrap { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+}

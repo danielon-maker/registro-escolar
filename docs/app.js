@@ -128,6 +128,7 @@
       case 'trabajos': html = viewTrabajos(); break;
       case 'examenes': html = viewExamenes(); break;
       case 'calificaciones': html = viewCalificaciones(); break;
+      case 'alumno': html = viewResumenAlumno(); break;
       default: html = viewMas();
     }
     renderShell(html, true);
@@ -374,6 +375,14 @@
     return html;
   }
 
+  /** Porcentaje efectivo en una materia (si hay conceptos que no aplican ahí, lo demás se escala para sumar 100). */
+  function pctEf(peso, materia) {
+    var fuera = Calc.conceptos(S.data).reduce(function (s, k) { return s + (Calc.aplicaEn(k, materia) ? 0 : k.peso); }, 0);
+    var v = 100 - fuera > 0 ? peso * 100 / (100 - fuera) : 0;
+    return (Math.round(v * 10) / 10) + '%';
+  }
+  function conceptosDe(materia) { return Calc.conceptos(S.data).filter(function (k) { return Calc.aplicaEn(k, materia); }); }
+
   function conceptoPorClave(c) { return Calc.conceptos(S.data).filter(function (k) { return k.clave === c; })[0]; }
 
   function chipsExamen(p) {
@@ -395,7 +404,12 @@
     if (!p) return '<div class="banner warn">Configura los periodos primero.</div>';
     var P = S.pts;
     var materia = '';
-    if (k.tipo === 'materia') { P.materia = campoValido(P.materia); materia = P.materia || ''; }
+    if (k.tipo === 'materia') {
+      var aplic = CAMPOS().filter(function (c) { return Calc.aplicaEn(k, c.id); });
+      if (!aplic.length) return '<div class="banner warn" style="margin-top:12px">' + esc(k.nombre) + ' no aplica en ninguna materia visible. Revísalo en Más → Periodos y porcentajes.</div>';
+      if (!aplic.some(function (c) { return c.id === P.materia; })) P.materia = aplic[0].id;
+      materia = P.materia;
+    }
     var key = p.id + '|' + k.clave + '|' + materia + '|' + (S.data.puntos || []).length;
     if (P.key !== key) {
       var m = Calc.indexar(S.data).puntos[p.id + '|' + k.clave + '|' + materia] || {};
@@ -404,11 +418,11 @@
     }
     var html = '<div style="margin-top:12px"></div>';
     if (k.tipo === 'materia') {
-      html += '<p class="muted small" style="margin:0 0 6px">' + esc(k.nombre) + ' se califica por materia. Elige la materia:</p><div class="chips" style="margin-bottom:10px">' + CAMPOS().map(function (c) {
+      html += '<p class="muted small" style="margin:0 0 6px">' + esc(k.nombre) + ' se califica por materia. Elige la materia:</p><div class="chips" style="margin-bottom:10px">' + CAMPOS().filter(function (c) { return Calc.aplicaEn(k, c.id); }).map(function (c) {
         return '<button class="chip' + (c.id === materia ? ' active' : '') + '" data-act="pts-materia" data-v="' + c.id + '">' + c.nombre + '</button>';
       }).join('') + '</div>';
     }
-    html += '<div class="banner info small"><b>' + esc(k.nombre) + '</b> de <b>' + esc(p.nombre) + '</b>' + (k.tipo === 'materia' ? ' en <b>' + esc(campoNombre(materia)) + '</b>' : '') + ': puntos de 0 a ' + k.max + '. Vale ' + k.peso + '% de la calificación de ' + (k.tipo === 'materia' ? 'esta materia' : '<b>cada</b> materia') + '.</div>' +
+    html += '<div class="banner info small"><b>' + esc(k.nombre) + '</b> de <b>' + esc(p.nombre) + '</b>' + (k.tipo === 'materia' ? ' en <b>' + esc(campoNombre(materia)) + '</b>' : '') + ': puntos de 0 a ' + k.max + '. Vale ' + (k.tipo === 'materia' ? pctEf(k.peso, materia) + ' de la calificación de esta materia' : k.peso + '% de ' + (k.materias && k.materias.length ? 'la calificación de: <b>' + k.materias.map(campoNombre).filter(Boolean).map(esc).join(', ') + '</b>' : 'la calificación de <b>cada</b> materia')) + '.</div>' +
       '<div class="row" style="margin-bottom:10px"><button class="btn" data-act="pts-todos">Poner ' + k.max + ' a los vacíos</button><button class="btn" data-act="pegar-abrir" data-tipo="pts">📋 Pegar lista</button></div>' +
       '<div class="list">' + alumnosActivos().map(function (a) {
         return '<div class="item"><span class="num">' + a.num + '</span><div class="name">' + esc(a.nombre) + '</div><input type="number" min="0" max="' + k.max + '" step="0.5" inputmode="decimal" data-input="pts" data-id="' + a.id + '" value="' + esc(P.valores[a.id]) + '"></div>';
@@ -450,6 +464,7 @@
     var tab = S.cal.tab === 'TODOS' ? 'TODOS' : (campoValido(S.cal.tab) === S.cal.tab ? S.cal.tab : 'TODOS');
     var html = '<div class="chips" style="margin-bottom:10px"><button class="chip' + (tab === 'TODOS' ? ' active' : '') + '" data-act="cal-tab" data-v="TODOS">Resumen</button>' +
       CAMPOS().map(function (c) { return '<button class="chip' + (tab === c.id ? ' active' : '') + '" data-act="cal-tab" data-v="' + c.id + '">' + c.nombre + '</button>'; }).join('') + '</div>';
+    html += '<div class="muted small" style="margin-bottom:4px">Toca a un alumno para ver su resumen completo.</div>';
     html += '<div class="muted small" style="margin-bottom:8px">' + esc(p.nombre) + ' · Examen ' + w.examen + '% · Trabajos ' + w.trabajos + '% · Asistencia ' + w.asistencia + '% · Disciplina ' + w.disciplina + '% · ' + R.posiblesAsis + ' días de clase</div>';
 
     var sinDisc = w.disciplina > 0 ? R.alumnos.filter(function (f) { return f.disc.puntos == null; }).length : 0;
@@ -457,7 +472,7 @@
     R.conceptos.forEach(function (k) {
       if (!k.peso) return;
       var falta = 0;
-      R.alumnos.forEach(function (f) { R.campos.forEach(function (c) { if (f.campos[c.id].cal != null && f.campos[c.id].extras[k.clave].valor == null) falta++; }); });
+      R.alumnos.forEach(function (f) { R.campos.forEach(function (c) { if (f.campos[c.id].cal != null && f.campos[c.id].extras[k.clave] && f.campos[c.id].extras[k.clave].valor == null) falta++; }); });
       if (falta) html += '<div class="banner warn small">Falta capturar <b>' + esc(k.nombre) + '</b> (' + falta + ' ' + (k.tipo === 'materia' ? 'calificaciones' : 'en total') + '; cuentan como 0). <a href="#" data-act="ir-concepto" data-v="' + esc(k.clave) + '">Capturar</a></div>';
     });
 
@@ -472,11 +487,11 @@
     } else {
       var pc = R.porCampo[tab];
       html += '<div class="table-wrap"><table><thead><tr><th>#</th><th class="left">Alumno</th><th>Examen<br>' + (pc.examen ? pc.examen.reactivos + ' r.' : '—') + '</th><th>Trabajos<br>de ' + pc.posibles + '</th><th>Asist.<br>de ' + R.posiblesAsis + '</th><th>Disc.</th>' +
-        R.conceptos.map(function (k) { return '<th>' + esc(k.nombre.slice(0, 10)) + '<br>de ' + k.max + '</th>'; }).join('') + '<th>Cal.</th></tr></thead><tbody>' +
+        conceptosDe(tab).map(function (k) { return '<th>' + esc(k.nombre.slice(0, 10)) + '<br>de ' + k.max + '</th>'; }).join('') + '<th>Cal.</th></tr></thead><tbody>' +
         R.alumnos.map(function (f) {
           var c = f.campos[tab];
           return '<tr class="clickable" data-act="cal-detalle" data-id="' + f.alumno.id + '"><td>' + f.alumno.num + '</td><td class="name">' + esc(f.alumno.nombre) + '</td><td>' + (c.examen.aciertos == null ? 'Faltó' : c.examen.aciertos) + '</td><td>' + fmt1(c.trabajos.hechos).replace('.0', '') + '</td><td>' + f.asis.asistio + '</td><td>' + (f.disc.puntos == null ? '—' : f.disc.puntos) + '</td>' +
-            R.conceptos.map(function (k) { var e = c.extras[k.clave]; return '<td>' + (e.valor == null ? '—' : e.valor) + '</td>'; }).join('') + '<td>' + gradeHtml(c.cal) + '</td></tr>';
+            conceptosDe(tab).map(function (k) { var e = c.extras[k.clave]; return '<td>' + (e.valor == null ? '—' : e.valor) + '</td>'; }).join('') + '<td>' + gradeHtml(c.cal) + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
 
@@ -496,17 +511,91 @@
     var w = S.data.grupo.pesos;
     var html = '<div class="row"><h2 class="grow">' + esc(f.alumno.nombre) + '</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div>' +
       '<p class="muted small">' + esc(R.periodo.nombre) + ' · Asistencias ' + f.asis.asistio + '/' + f.asis.posibles + ' · Disciplina ' + (f.disc.puntos == null ? 'sin capturar' : f.disc.puntos + '/' + f.disc.max) + '</p>';
+    html += desgloseMaterias(f, R, w);
+    openModal(html);
+  }
+
+  function desgloseMaterias(f, R, w) {
+    var html = '';
     CAMPOS().forEach(function (c) {
       var x = f.campos[c.id];
       html += '<div class="card" style="background:#faf9ff"><div class="row"><b class="grow">' + c.nombre + '</b>' + gradeHtml(x.cal) + '</div><table style="margin-top:6px"><tbody>' +
-        '<tr><td class="left">Examen (' + w.examen + '%)</td><td>' + (x.examen.reactivos == null ? 'Sin examen' : x.examen.aciertos == null ? 'Faltó' : x.examen.aciertos + '/' + x.examen.reactivos) + '</td><td>' + x.examen.pts.toFixed(2) + '</td></tr>' +
-        '<tr><td class="left">Trabajos (' + w.trabajos + '%)</td><td>' + fmt1(x.trabajos.hechos).replace('.0', '') + '/' + x.trabajos.posibles + '</td><td>' + x.trabajos.pts.toFixed(2) + '</td></tr>' +
-        '<tr><td class="left">Asistencia (' + w.asistencia + '%)</td><td>' + f.asis.asistio + '/' + f.asis.posibles + '</td><td>' + x.asistencia.pts.toFixed(2) + '</td></tr>' +
-        '<tr><td class="left">Disciplina (' + w.disciplina + '%)</td><td>' + (f.disc.puntos == null ? '—' : f.disc.puntos + '/' + f.disc.max) + '</td><td>' + x.disciplina.pts.toFixed(2) + '</td></tr>' +
-        R.conceptos.map(function (k) { var e = x.extras[k.clave]; return '<tr><td class="left">' + esc(k.nombre) + ' (' + k.peso + '%)</td><td>' + (e.valor == null ? '—' : e.valor + '/' + e.max) + '</td><td>' + e.pts.toFixed(2) + '</td></tr>'; }).join('') +
+        '<tr><td class="left">Examen (' + pctEf(w.examen, c.id) + ')</td><td>' + (x.examen.reactivos == null ? 'Sin examen' : x.examen.aciertos == null ? 'Faltó' : x.examen.aciertos + '/' + x.examen.reactivos) + '</td><td>' + x.examen.pts.toFixed(2) + '</td></tr>' +
+        '<tr><td class="left">Trabajos (' + pctEf(w.trabajos, c.id) + ')</td><td>' + fmt1(x.trabajos.hechos).replace('.0', '') + '/' + x.trabajos.posibles + '</td><td>' + x.trabajos.pts.toFixed(2) + '</td></tr>' +
+        '<tr><td class="left">Asistencia (' + pctEf(w.asistencia, c.id) + ')</td><td>' + f.asis.asistio + '/' + f.asis.posibles + '</td><td>' + x.asistencia.pts.toFixed(2) + '</td></tr>' +
+        '<tr><td class="left">Disciplina (' + pctEf(w.disciplina, c.id) + ')</td><td>' + (f.disc.puntos == null ? '—' : f.disc.puntos + '/' + f.disc.max) + '</td><td>' + x.disciplina.pts.toFixed(2) + '</td></tr>' +
+        conceptosDe(c.id).map(function (k) { var e = x.extras[k.clave]; return '<tr><td class="left">' + esc(k.nombre) + ' (' + pctEf(k.peso, c.id) + ')</td><td>' + (e.valor == null ? '—' : e.valor + '/' + e.max) + '</td><td>' + e.pts.toFixed(2) + '</td></tr>'; }).join('') +
         '</tbody></table></div>';
     });
-    openModal(html);
+    return html;
+  }
+
+  // ===================== Resumen de un alumno =====================
+  function abrirResumen(id) {
+    if (!confirmLeave()) return;
+    closeModal();
+    S.resumen = { id: id, volver: { view: S.view, mas: S.mas } };
+    S.view = 'alumno'; render(); window.scrollTo(0, 0);
+  }
+
+  function viewResumenAlumno() {
+    var a = S.data.alumnos.filter(function (x) { return x.id === S.resumen.id; })[0];
+    if (!a) return '<div class="banner warn">Alumno no encontrado.</div>';
+    var p = periodo(), w = S.data.grupo.pesos;
+    var Z = Calc.resumenAlumno(S.data, a.id, S.periodoId);
+    var html = '<div class="row no-print" style="margin-bottom:8px"><button class="btn ghost" data-act="resumen-volver">‹ Volver</button><span class="grow"></span><button class="btn" data-act="imprimir">🖨 Imprimir / PDF</button></div>' +
+      '<div class="card"><div class="muted small">' + esc(S.data.grupo.nombre) + (S.data.escuela ? ' · ' + esc(S.data.escuela.nombre) : '') + ' · Ciclo ' + esc(S.data.grupo.ciclo || '') + '</div>' +
+      '<h2 style="margin:4px 0">' + esc(a.nombre) + '</h2><div class="muted small">' + (a.activo ? 'Número de lista ' + a.num : '<b>' + esc(ESTADO_ALUMNO[a.estado]) + '</b>' + (a.fechaBaja ? ' el ' + esc(fmtDate(a.fechaBaja)) : '') + (a.nota ? ' · ' + esc(a.nota) : '')) + '</div></div>';
+    if (!a.activo) return html + '<div class="banner info">El alumno ya no está activo en el grupo; sus calificaciones no se calculan.</div>';
+
+    // Calificaciones por trimestre
+    var pers = Z.porPeriodo;
+    html += '<h3>Calificaciones por trimestre</h3><div class="table-wrap"><table><thead><tr><th class="left">Materia</th>' + pers.map(function (x) { return '<th>' + esc(x.periodo.nombre) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      CAMPOS().map(function (c) {
+        return '<tr><td class="left">' + esc(c.nombre) + '</td>' + pers.map(function (x) { return '<td>' + (x.fila ? gradeHtml(x.fila.campos[c.id].cal) : '—') + '</td>'; }).join('') + '</tr>';
+      }).join('') +
+      '<tr><td class="left"><b>Promedio</b></td>' + pers.map(function (x) { return '<td>' + (x.fila ? gradeHtml(x.fila.promedio) : '—') + '</td>'; }).join('') + '</tr></tbody></table></div>';
+
+    if (!p || !Z.actual || !Z.actual.fila) return html;
+    var f = Z.actual.fila;
+    html += '<h3 style="margin-top:16px">' + esc(p.nombre) + ' en detalle</h3>';
+
+    // Asistencia
+    html += '<div class="stats" style="margin-bottom:8px">' +
+      '<div class="stat"><b style="color:var(--ok)">' + f.asis.asistio + '/' + f.asis.posibles + '</b><span>Asistencias</span></div>' +
+      '<div class="stat"><b style="color:var(--bad)">' + Z.faltas.length + '</b><span>Faltas</span></div>' +
+      '<div class="stat"><b style="color:var(--warn)">' + Z.retardos.length + '</b><span>Retardos</span></div>' +
+      '<div class="stat"><b style="color:var(--info)">' + Z.justificadas.length + '</b><span>Justificadas</span></div></div>';
+    var lista = function (t, arr) { return arr.length ? '<div class="small"><b>' + t + ':</b> ' + arr.map(fmtDate).join(', ') + '</div>' : ''; };
+    var fechas = lista('Faltas', Z.faltas) + lista('Retardos', Z.retardos) + lista('Justificadas', Z.justificadas);
+    if (fechas) html += '<div class="card stack">' + fechas + '<div class="muted small">Solo incluye los días capturados en la app.</div></div>';
+
+    // Trabajos pendientes
+    html += '<h3>Trabajos no entregados</h3>';
+    html += Z.pendientes.length ? '<div class="table-wrap"><table><thead><tr><th class="left">Materia</th><th class="left">Actividad</th><th>Fecha</th><th></th></tr></thead><tbody>' +
+      Z.pendientes.map(function (t) { return '<tr><td class="left">' + esc(t.materia) + '</td><td class="left">' + esc(t.titulo) + '</td><td>' + esc(fmtDate(t.fecha)) + '</td><td>' + (t.valor === 0.5 ? '<span class="g g-medio">½</span>' : '<span class="g g-bajo">No</span>') + '</td></tr>'; }).join('') + '</tbody></table></div>'
+      : '<div class="banner ok small">Entregó todos los trabajos registrados en la app este trimestre.</div>';
+
+    // Exámenes
+    html += '<h3 style="margin-top:16px">Exámenes</h3><div class="table-wrap"><table><thead><tr><th class="left">Materia</th><th>Diagnóstico</th><th>' + esc(p.nombre) + '</th></tr></thead><tbody>' +
+      CAMPOS().map(function (c) {
+        var dg = Z.diagnostico[c.id], ex = f.campos[c.id].examen;
+        var celda = function (ac, re, cal) { return re == null ? '<span class="muted">—</span>' : ac == null ? 'Faltó' : ac + '/' + re + ' ' + gradeHtml(cal); };
+        return '<tr><td class="left">' + esc(c.nombre) + '</td><td>' + (dg ? celda(dg.aciertos, dg.reactivos, dg.cal) : '<span class="muted">—</span>') + '</td><td>' + celda(ex.aciertos, ex.reactivos, ex.cal) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    // Disciplina y conceptos generales
+    var gen = Calc.conceptos(S.data).filter(function (k) { return k.tipo === 'general'; });
+    html += '<div class="card stack" style="margin-top:12px"><div class="row"><span class="grow">⭐ Disciplina</span><b>' + (f.disc.puntos == null ? 'sin capturar' : f.disc.puntos + '/' + f.disc.max) + '</b></div>' +
+      gen.map(function (k) {
+        var c = CAMPOS().filter(function (m) { return Calc.aplicaEn(k, m.id); })[0];
+        var e = c ? f.campos[c.id].extras[k.clave] : null;
+        return '<div class="row"><span class="grow">🏷️ ' + esc(k.nombre) + '</span><b>' + (!e || e.valor == null ? 'sin capturar' : e.valor + '/' + e.max) + '</b></div>';
+      }).join('') + '</div>';
+
+    // Desglose
+    html += '<h3>Cómo se calculó cada materia</h3>' + desgloseMaterias(f, Z.actual.R, w);
+    return html;
   }
 
   // ===================== Más =====================
@@ -641,6 +730,10 @@
       '<label class="field"><span>Nombre</span><input type="text" class="k-nombre" maxlength="40" value="' + esc(k.nombre) + '" placeholder="Ej: Participación"></label>' +
       '<div class="row nowrap" style="margin-top:8px"><label class="field grow"><span>Porcentaje (%)</span><input type="number" min="0" max="100" class="k-peso peso-input" data-input="peso" value="' + esc(k.peso) + '"></label>' +
       '<label class="field grow"><span>Puntos máximos</span><input type="number" min="1" class="k-max" value="' + esc(k.max) + '"></label></div>' +
+      '<div class="field" style="margin-top:8px"><span>Aplica en</span><div class="chips" style="flex-wrap:wrap">' + CAMPOS().map(function (c) {
+        var on = !k.materias || !k.materias.length || k.materias.indexOf(c.id) >= 0;
+        return '<label class="chip" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" class="k-mat" value="' + c.id + '"' + (on ? ' checked' : '') + '>' + esc(c.nombre) + '</label>';
+      }).join('') + '</div><span class="muted small">En las materias donde no aplica, su porcentaje se reparte proporcionalmente en las demás partes.</span></div>' +
       '<label class="field" style="margin-top:8px"><span>Se califica</span><select class="k-tipo"><option value="general"' + (k.tipo === 'general' ? ' selected' : '') + '>Una sola vez para todas las materias (como disciplina)</option><option value="materia"' + (k.tipo === 'materia' ? ' selected' : '') + '>Por separado en cada materia</option></select></label>' +
       '<div class="row" style="margin-top:8px"><span class="grow"></span><button class="btn ghost small" style="color:var(--bad)" data-act="concepto-quitar">' + (k.clave ? 'Eliminar' : 'Quitar') + '</button></div></div>';
   }
@@ -833,7 +926,8 @@
       '<label class="field"><span>Fecha</span><input type="date" name="fechaBaja" value="' + esc(a.fechaBaja || today()) + '"></label>' +
       '<label class="field"><span id="alumno-nota-label">' + (estadoSel === 'transferencia' ? 'Escuela o grupo de destino' : 'Motivo (opcional)') + '</span><input type="text" name="nota" maxlength="200" value="' + esc(a.nota || '') + '"></label>' +
       '<p class="muted small">El alumno sale de la lista y de las calificaciones, pero su historial se conserva. Puedes reactivarlo cuando quieras.</p></div>' +
-      '<button class="btn primary block" type="submit">Guardar</button></form>');
+      '<button class="btn primary block" type="submit">Guardar</button></form>' +
+      '<button class="btn block" style="margin-top:10px" data-act="resumen-abrir" data-id="' + a.id + '">📄 Ver resumen del alumno</button>');
     var sel = document.getElementById('alumno-estado');
     sel.addEventListener('change', function () {
       document.getElementById('alumno-baja').hidden = sel.value === 'activo';
@@ -886,12 +980,12 @@
       CAMPOS().forEach(function (c) {
         var pc = R.porCampo[c.id];
         var rows = [['CAMPO FORMATIVO DE ' + c.largo + ' — ' + p.nombre],
-          ['# LISTA', 'ALUMNO', 'REACTIVOS', 'ACIERTOS', 'CALIFICACIÓN', 'EXAMEN ' + g.pesos.examen + '%', 'TRABAJOS REALIZADOS (de ' + pc.posibles + ')', 'TRABAJOS ' + g.pesos.trabajos + '%', 'ASISTENCIAS (de ' + R.posiblesAsis + ')', 'ASISTENCIA ' + g.pesos.asistencia + '%', 'DISCIPLINA (de ' + g.disciplinaMax + ')', 'DISCIPLINA ' + g.pesos.disciplina + '%'].concat([].concat.apply([], R.conceptos.map(function (k) { return [k.nombre.toUpperCase() + ' (de ' + k.max + ')', k.nombre.toUpperCase() + ' ' + k.peso + '%']; }))).concat(['PROMEDIO'])];
+          ['# LISTA', 'ALUMNO', 'REACTIVOS', 'ACIERTOS', 'CALIFICACIÓN', 'EXAMEN ' + pctEf(g.pesos.examen, c.id), 'TRABAJOS REALIZADOS (de ' + pc.posibles + ')', 'TRABAJOS ' + pctEf(g.pesos.trabajos, c.id), 'ASISTENCIAS (de ' + R.posiblesAsis + ')', 'ASISTENCIA ' + pctEf(g.pesos.asistencia, c.id), 'DISCIPLINA (de ' + g.disciplinaMax + ')', 'DISCIPLINA ' + pctEf(g.pesos.disciplina, c.id)].concat([].concat.apply([], conceptosDe(c.id).map(function (k) { return [k.nombre.toUpperCase() + ' (de ' + k.max + ')', k.nombre.toUpperCase() + ' ' + pctEf(k.peso, c.id)]; }))).concat(['PROMEDIO'])];
         R.alumnos.forEach(function (f) {
           var x = f.campos[c.id];
           rows.push([f.alumno.num, f.alumno.nombre, x.examen.reactivos == null ? '' : x.examen.reactivos, x.examen.aciertos == null ? '' : x.examen.aciertos,
             x.examen.cal == null ? 'Faltó' : r2(x.examen.cal), r2(x.examen.pts), x.trabajos.hechos, r2(x.trabajos.pts), f.asis.asistio, r2(x.asistencia.pts),
-            f.disc.puntos == null ? '' : f.disc.puntos, r2(x.disciplina.pts)].concat([].concat.apply([], R.conceptos.map(function (k) { var e = x.extras[k.clave]; return [e.valor == null ? '' : e.valor, r2(e.pts)]; }))).concat([r2(x.cal)]));
+            f.disc.puntos == null ? '' : f.disc.puntos, r2(x.disciplina.pts)].concat([].concat.apply([], conceptosDe(c.id).map(function (k) { var e = x.extras[k.clave]; return [e.valor == null ? '' : e.valor, r2(e.pts)]; }))).concat([r2(x.cal)]));
         });
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), nombreHoja(c.nombre));
       });
@@ -1032,7 +1126,10 @@
 
     // Calificaciones
     'cal-tab': function (el) { S.cal.tab = el.dataset.v; render(); },
-    'cal-detalle': function (el) { detalleAlumno(el.dataset.id); },
+    'cal-detalle': function (el) { abrirResumen(el.dataset.id); },
+    'resumen-abrir': function (el) { abrirResumen(el.dataset.id); },
+    'resumen-volver': function () { var v = S.resumen && S.resumen.volver; S.view = v ? v.view : 'calificaciones'; S.mas = v ? v.mas : null; render(); },
+    imprimir: function () { window.print(); },
     exportar: exportar,
 
     // Disciplina
@@ -1077,14 +1174,18 @@
       var ps = Array.prototype.map.call(document.querySelectorAll('.periodo'), function (c) {
         return { id: c.dataset.id || null, nombre: c.querySelector('.p-nombre').value, inicio: c.querySelector('.p-inicio').value, fin: c.querySelector('.p-fin').value };
       }).filter(function (p) { return p.nombre && p.inicio && p.fin; });
-      busy(el, api('savePeriodos', { grupoId: S.grupoId, periodos: ps }), 'Periodos guardados').then(refresh);
+      busy(el, api('savePeriodos', { grupoId: S.grupoId, periodos: ps }), 'Periodos guardados').then(function () { S.dirty = false; return refresh(); });
     },
     'pesos-guardar': function (el) {
       var w = {}; ['examen', 'trabajos', 'asistencia', 'disciplina'].forEach(function (k) { w[k] = Number(document.getElementById('peso-' + k).value); });
       var ks = Array.prototype.map.call(document.querySelectorAll('.concepto'), function (c) {
-        return { clave: c.dataset.clave || null, nombre: c.querySelector('.k-nombre').value, peso: Number(c.querySelector('.k-peso').value), max: Number(c.querySelector('.k-max').value), tipo: c.querySelector('.k-tipo').value };
+        var todas = c.querySelectorAll('.k-mat'), marcadas = Array.prototype.filter.call(todas, function (i) { return i.checked; }).map(function (i) { return i.value; });
+        return { clave: c.dataset.clave || null, nombre: c.querySelector('.k-nombre').value, peso: Number(c.querySelector('.k-peso').value), max: Number(c.querySelector('.k-max').value), tipo: c.querySelector('.k-tipo').value,
+          materias: marcadas.length === todas.length ? [] : marcadas, ninguna: !marcadas.length };
       });
-      busy(el, api('saveGroupSettings', { grupoId: S.grupoId, pesos: w, conceptos: ks, disciplinaMax: Number(document.getElementById('disc-max').value) }), 'Porcentajes guardados').then(refresh);
+      var vacia = ks.filter(function (k) { return k.ninguna; })[0];
+      if (vacia) return toast('Marca al menos una materia en "' + (vacia.nombre || 'el concepto') + '"', true);
+      busy(el, api('saveGroupSettings', { grupoId: S.grupoId, pesos: w, conceptos: ks, disciplinaMax: Number(document.getElementById('disc-max').value) }), 'Porcentajes guardados').then(function () { S.dirty = false; return refresh(); });
     },
     'concepto-agregar': function () { document.getElementById('conceptos').insertAdjacentHTML('beforeend', conceptoRow(null)); actualizarSumaPesos(); },
     'concepto-quitar': function (el) {

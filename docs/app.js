@@ -542,8 +542,29 @@
     return '<h2>Alumnos (' + activos.length + ' activos)</h2><p class="muted small">La lista se ordena sola por orden alfabético (apellido paterno, materno y nombre) cada vez que agregas o corriges un alumno.</p>' +
       '<div class="list">' + (activos.length ? activos.map(fila).join('') : '<div class="item muted">Sin alumnos activos</div>') + '</div>' +
       (otros.length ? '<h3 style="margin-top:16px">Bajas y transferencias (' + otros.length + ')</h3><p class="muted small">Ya no aparecen en la lista ni en las calificaciones, pero su historial se conserva.</p><div class="list">' + otros.map(fila).join('') + '</div>' : '') +
-      '<div class="card stack" style="margin-top:14px"><h3>Agregar alumnos</h3><p class="muted small">Pega uno o varios nombres, uno por renglón, empezando por los apellidos. Se acomodan en orden alfabético automáticamente.</p>' +
-      '<textarea id="nuevos-alumnos" placeholder="PEREZ LOPEZ MARIA FERNANDA" autocapitalize="characters" spellcheck="false"></textarea><button class="btn primary" data-act="alumnos-agregar">Agregar</button></div>';
+      tarjetaAgregar();
+  }
+
+  var FORMATOS = {
+    apellidos: { titulo: 'Apellidos primero', ej: 'PÉREZ LÓPEZ MARÍA FERNANDA', corto: 'apellidos primero (paterno, materno y nombre)' },
+    nombre: { titulo: 'Nombre primero', ej: 'MARÍA FERNANDA PÉREZ LÓPEZ', corto: 'nombre primero y después los apellidos' }
+  };
+
+  function tarjetaAgregar() {
+    var fmt = S.data.grupo.formatoNombre;
+    if (!fmt || S.elegirFormato) {
+      return '<div class="card stack" style="margin-top:14px"><h3>¿Cómo escribes los nombres en este grupo?</h3>' +
+        '<p class="muted small">La lista se ordena alfabéticamente según como estén escritos, así que todos los alumnos del grupo deben escribirse igual.' + (S.data.alumnos.length && !fmt ? ' Revisa cómo están los que ya tienes y elige ese mismo formato.' : '') + '</p>' +
+        Object.keys(FORMATOS).map(function (k) {
+          return '<button class="btn block' + (k === fmt ? ' primary' : '') + '" style="text-align:left" data-act="formato-elegir" data-v="' + k + '"><b>' + FORMATOS[k].titulo + '</b><br><span class="small" style="font-weight:400">Ej: ' + FORMATOS[k].ej + '</span></button>';
+        }).join('') +
+        (fmt ? '<p class="muted small">Cambiar el formato no modifica los nombres que ya registraste; si cambias, corrígelos para que el orden quede bien.</p><button class="btn ghost" data-act="formato-cancelar">Cancelar</button>' : '') + '</div>';
+    }
+    var F = FORMATOS[fmt];
+    return '<div class="card stack" style="margin-top:14px"><h3>Agregar alumnos</h3>' +
+      '<div class="banner info small" style="margin:0">📌 En este grupo los nombres se escriben con <b>' + F.corto + '</b>.<br>Ejemplo: <b>' + F.ej + '</b> <a href="#" data-act="formato-cambiar" style="margin-left:6px">cambiar</a></div>' +
+      '<p class="muted small" style="margin:0">Uno por renglón. Se acomodan en orden alfabético automáticamente.</p>' +
+      '<textarea id="nuevos-alumnos" placeholder="' + F.ej + '" autocapitalize="characters" spellcheck="false"></textarea><button class="btn primary" data-act="alumnos-agregar">Agregar</button></div>';
   }
 
   function viewPeriodos() {
@@ -731,7 +752,7 @@
   function modalAlumno(a) {
     var estadoSel = a.estado || (a.activo ? 'activo' : 'baja');
     openModal('<div class="row"><h2 class="grow">Editar alumno</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div><form id="form-alumno" class="stack">' +
-      '<label class="field"><span>Nombre completo (apellidos primero)</span><input type="text" name="nombre" value="' + esc(a.nombre) + '" required autocapitalize="characters" spellcheck="false"></label>' +
+      '<label class="field"><span>Nombre completo' + (FORMATOS[S.data.grupo.formatoNombre] ? ' (' + FORMATOS[S.data.grupo.formatoNombre].corto + ')' : '') + '</span><input type="text" name="nombre" value="' + esc(a.nombre) + '" required autocapitalize="characters" spellcheck="false"></label>' +
       '<label class="field"><span>Situación</span><select name="estado" id="alumno-estado">' + Object.keys(ESTADO_ALUMNO).map(function (k) {
         return '<option value="' + k + '"' + (k === estadoSel ? ' selected' : '') + '>' + ESTADO_ALUMNO[k] + '</option>';
       }).join('') + '</select></label>' +
@@ -829,7 +850,7 @@
     'cerrar-modal': closeModal,
     mas: function (el) {
       if (!confirmLeave()) return;
-      if (S.view !== 'mas') S.view = 'mas'; S.mas = el.dataset.v || null; S.matEdit = null;
+      if (S.view !== 'mas') S.view = 'mas'; S.mas = el.dataset.v || null; S.matEdit = null; S.elegirFormato = false;
       if (S.mas === 'aviso') { S.mas = null; window.open('aviso-privacidad.html', '_blank'); return; }
       if (S.mas === 'grupos') { S.mas = null; S.view = 'grupos'; render(); window.scrollTo(0, 0); return; } if (S.mas === 'admin') S.admin.users = null; S.disc.key = null; S.carga.key = null; render(); window.scrollTo(0, 0); },
 
@@ -955,6 +976,8 @@
     'alumnos-agregar': function (el) {
       var lines = document.getElementById('nuevos-alumnos').value.split(/\n+/).map(limpiarNombre).filter(function (s) { return /[A-ZÀ-Þ]/.test(s); });
       if (!lines.length) return toast('Escribe al menos un nombre', true);
+      var F = FORMATOS[S.data.grupo.formatoNombre];
+      if (F && !confirm('Recordatorio: en este grupo los nombres van con ' + F.corto + '.\nEjemplo: ' + F.ej + '\n\nVas a agregar:\n' + lines.slice(0, 10).join('\n') + (lines.length > 10 ? '\n…y ' + (lines.length - 10) + ' más' : '') + '\n\n¿Están escritos así?')) return;
       var alumnos = lines.map(function (n) { return { nombre: n }; });
       busy(el, api('saveStudents', { grupoId: S.grupoId, alumnos: alumnos }), lines.length + ' alumno(s) agregado(s)').then(function () { S.asis = null; return refresh(); });
     },
@@ -998,6 +1021,14 @@
       if (j < 0 || j >= L.length) return;
       var t = L[i]; L[i] = L[j]; L[j] = t; S.dirty = true; render();
     },
+    'formato-elegir': function (el) {
+      var v = el.dataset.v;
+      busy(el, api('saveGroup', { id: S.grupoId, formatoNombre: v }), 'Formato guardado: ' + FORMATOS[v].titulo.toLowerCase()).then(function () {
+        S.elegirFormato = false; S.data.grupo.formatoNombre = v; render(); return loadGroups().then(refresh);
+      });
+    },
+    'formato-cambiar': function () { S.elegirFormato = true; render(); },
+    'formato-cancelar': function () { S.elegirFormato = false; render(); },
     'mat-quitar-nueva': function (el) { S.matEdit.splice(Number(el.dataset.i), 1); render(); },
     'mat-eliminar': function (el) {
       var clave = el.dataset.clave;

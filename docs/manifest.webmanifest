@@ -1,0 +1,9 @@
+{
+  "name": "Registro Escolar",
+  "short_name": "Registro",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f5fb",
+  "theme_color": "#5b4bd6",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

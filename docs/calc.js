@@ -1,0 +1,156 @@
+/* Cálculo de calificaciones — mismo método que el Excel REGISTRO ANUAL:
+ *   Calificación del campo = Examen (20%) + Trabajos (60%) + Asistencia (10%) + Disciplina (10%)
+ * Cada parte es (logrado / posible) × peso. El resultado se muestra en escala 0–10.
+ */
+(function (root) {
+  var CAMPOS = [
+    { id: 'LEN', nombre: 'Lenguajes', largo: 'LENGUAJES', hoja: 'LENGUAJES' },
+    { id: 'SAB', nombre: 'Saberes', largo: 'SABERES Y PENSAMIENTO CIENTÍFICO', hoja: 'SABERES' },
+    { id: 'ETI', nombre: 'Ética', largo: 'ÉTICA, NATURALEZA Y SOCIEDAD', hoja: 'ÉTICA' },
+    { id: 'HUM', nombre: 'De lo Humano', largo: 'DE LO HUMANO Y LO COMUNITARIO', hoja: 'DE LO HUMANO' }
+  ];
+  var CUENTA_COMO_ASISTENCIA = { P: true, R: true, J: true };
+
+  function inRange(f, p) { return f >= p.inicio && f <= p.fin; }
+
+  /** Índices rápidos sobre los datos crudos del grupo. */
+  function indexar(d) {
+    var ix = { sinClase: {}, asis: {}, entregas: {}, resultados: {}, disciplina: {}, carga: {} };
+    d.diasSinClase.forEach(function (x) { ix.sinClase[x.fecha] = x.motivo || 'Sin clase'; });
+    d.asistencia.forEach(function (r) { (ix.asis[r[0]] = ix.asis[r[0]] || {})[r[1]] = r[2]; });
+    d.entregas.forEach(function (r) { (ix.entregas[r[0]] = ix.entregas[r[0]] || {})[r[1]] = r[2]; });
+    d.resultados.forEach(function (r) { (ix.resultados[r[0]] = ix.resultados[r[0]] || {})[r[1]] = r[2]; });
+    d.disciplina.forEach(function (r) { (ix.disciplina[r[0]] = ix.disciplina[r[0]] || {})[r[1]] = r[2]; });
+    d.carga.forEach(function (r) {
+      var k = r[0] + '|' + r[1];
+      (ix.carga[k] = ix.carga[k] || {})[r[2]] = r[3];
+    });
+    return ix;
+  }
+
+  function diasDeClase(d, ix, p) {
+    return Object.keys(ix.asis).filter(function (f) { return inRange(f, p) && !ix.sinClase[f]; }).sort();
+  }
+
+  function examenDe(d, periodoId, campo, tipo) {
+    return d.examenes.filter(function (x) {
+      return x.campo === campo && x.tipo === (tipo || 'trimestral') && (tipo === 'diagnostico' || x.periodoId === periodoId);
+    })[0] || null;
+  }
+
+  /**
+   * Calcula todo para un periodo.
+   * Devuelve { periodo, dias, alumnos: [{ alumno, asis, disc, campos: {LEN: {...}}, promedio }], resumen }
+   */
+  function calcular(d, periodoId) {
+    var ix = indexar(d);
+    var p = d.periodos.filter(function (x) { return x.id === periodoId; })[0];
+    if (!p) return null;
+    var w = d.grupo.pesos;
+    var dmax = d.grupo.disciplinaMax || 10;
+
+    var dias = diasDeClase(d, ix, p);
+    var cargaAsis = ix.carga[p.id + '|ASIS'] || {};
+    var posiblesAsis = dias.length + (Number(cargaAsis.TOTAL) || 0);
+
+    var porCampo = {};
+    CAMPOS.forEach(function (c) {
+      var acts = d.actividades.filter(function (a) { return a.campo === c.id && inRange(a.fecha, p); });
+      var carga = ix.carga[p.id + '|TRAB_' + c.id] || {};
+      porCampo[c.id] = {
+        acts: acts, carga: carga,
+        posibles: acts.length + (Number(carga.TOTAL) || 0),
+        examen: examenDe(d, p.id, c.id, 'trimestral')
+      };
+    });
+
+    var activos = d.alumnos.filter(function (a) { return a.activo; });
+    var filas = activos.map(function (al) {
+      var asistio = dias.reduce(function (n, f) { return n + (CUENTA_COMO_ASISTENCIA[(ix.asis[f] || {})[al.id]] ? 1 : 0); }, 0);
+      asistio += Number(cargaAsis[al.id]) || 0;
+      var rAsis = posiblesAsis ? asistio / posiblesAsis : 0;
+
+      var puntos = (ix.disciplina[p.id] || {})[al.id];
+      var rDisc = puntos == null ? 0 : puntos / dmax;
+
+      var campos = {};
+      var suma = 0;
+      CAMPOS.forEach(function (c) {
+        var pc = porCampo[c.id];
+        var hechos = pc.acts.reduce(function (n, a) { return n + (Number((ix.entregas[a.id] || {})[al.id]) || 0); }, 0);
+        hechos += Number(pc.carga[al.id]) || 0;
+        var rTrab = pc.posibles ? hechos / pc.posibles : 0;
+
+        var ex = pc.examen, aciertos = null, rEx = 0;
+        if (ex) {
+          aciertos = (ix.resultados[ex.id] || {})[al.id];
+          if (aciertos == null) aciertos = null;
+          rEx = aciertos == null ? 0 : aciertos / ex.reactivos;
+        }
+        var cal = (rEx * w.examen + rTrab * w.trabajos + rAsis * w.asistencia + rDisc * w.disciplina) / 10;
+        campos[c.id] = {
+          examen: { reactivos: ex ? ex.reactivos : null, aciertos: aciertos, cal: ex && aciertos != null ? aciertos / ex.reactivos * 10 : null, pts: rEx * w.examen / 10 },
+          trabajos: { hechos: hechos, posibles: pc.posibles, pts: rTrab * w.trabajos / 10 },
+          asistencia: { pts: rAsis * w.asistencia / 10 },
+          disciplina: { pts: rDisc * w.disciplina / 10 },
+          cal: cal
+        };
+        suma += cal;
+      });
+      return {
+        alumno: al,
+        asis: { asistio: asistio, posibles: posiblesAsis },
+        disc: { puntos: puntos == null ? null : puntos, max: dmax },
+        campos: campos,
+        promedio: suma / CAMPOS.length
+      };
+    });
+
+    var resumen = {};
+    CAMPOS.forEach(function (c) { resumen[c.id] = distribucion(filas.map(function (f) { return f.campos[c.id].cal; })); });
+    resumen.PROM = distribucion(filas.map(function (f) { return f.promedio; }));
+
+    return { periodo: p, dias: dias, posiblesAsis: posiblesAsis, porCampo: porCampo, alumnos: filas, resumen: resumen };
+  }
+
+  /** Igual que el Excel: ≤6.49 → "6", 6.5–8.99 → "7-8", ≥9 → "9-10". */
+  function distribucion(cals) {
+    var r = { bajo: 0, medio: 0, alto: 0, n: 0, promedio: null };
+    var s = 0;
+    cals.forEach(function (c) {
+      if (c == null || isNaN(c)) return;
+      r.n++; s += c;
+      if (c < 6.5) r.bajo++; else if (c < 9) r.medio++; else r.alto++;
+    });
+    r.promedio = r.n ? s / r.n : null;
+    return r;
+  }
+
+  /** Resultados de un examen (diagnóstico o trimestral) por campo. */
+  function resultadosExamen(d, tipo, periodoId) {
+    var ix = indexar(d);
+    var out = {};
+    CAMPOS.forEach(function (c) {
+      var ex = examenDe(d, periodoId, c.id, tipo);
+      var cals = d.alumnos.filter(function (a) { return a.activo; }).map(function (a) {
+        if (!ex) return null;
+        var ac = (ix.resultados[ex.id] || {})[a.id];
+        return ac == null ? null : ac / ex.reactivos * 10;
+      });
+      out[c.id] = { examen: ex, cals: cals, resumen: distribucion(cals) };
+    });
+    return out;
+  }
+
+  /** Conteo de asistencias por alumno dentro del periodo (para mostrar "36/40"). */
+  function asistenciasPeriodo(d, periodoId) {
+    var r = calcular(d, periodoId);
+    var m = {};
+    if (r) r.alumnos.forEach(function (f) { m[f.alumno.id] = f.asis; });
+    return m;
+  }
+
+  var api = { CAMPOS: CAMPOS, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
+    asistenciasPeriodo: asistenciasPeriodo, indexar: indexar, examenDe: examenDe };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Calc = api;
+})(this);

@@ -625,21 +625,21 @@
     var html = (sinGrupo ? '<button class="btn ghost" data-act="admin-salir" style="margin-bottom:8px">‹ Grupos</button>' : '') +
       '<div class="row"><h2 class="grow">Usuarios</h2><button class="btn primary" data-act="usuario-nuevo">+ Usuario</button></div>' +
       '<div class="list">' + users.map(function (u) {
-        return '<div class="item clickable" data-act="usuario-editar" data-id="' + u.id + '"><div class="name"><b>' + esc(u.nombre) + '</b><small>@' + esc(u.usuario) + '</small></div><span class="badge' + (u.activo ? '' : ' off') + '">' + (u.activo ? u.rol : 'inactivo') + '</span><span>›</span></div>';
+        return '<div class="item clickable" data-act="usuario-editar" data-id="' + u.id + '"><div class="name"><b>' + esc(u.nombre) + '</b><small>@' + esc(u.usuario) + '</small></div><span class="badge' + (u.activo ? '' : ' off') + '">' + (u.activo ? (u.rol === 'admin' ? 'admin' : u.rol === 'maestro' ? 'Maestro' : 'Maestra') : 'inactivo') + '</span><span>›</span></div>';
       }).join('') + '</div>' +
       '<div class="row" style="margin-top:18px"><h2 class="grow">Grupos</h2><button class="btn primary" data-act="grupo-nuevo">+ Grupo</button></div>' +
       '<div class="list">' + S.groups.map(function (g) {
-        return '<div class="item clickable" data-act="grupo-editar" data-id="' + g.id + '"><div class="name"><b>' + esc(g.nombre) + '</b><small>' + [g.escuela, g.ciclo, g.maestra || 'Sin maestra asignada'].filter(Boolean).map(esc).join(' · ') + '</small></div>' + (g.activo ? '' : '<span class="badge off">Inactivo</span>') + '<span>›</span></div>';
+        return '<div class="item clickable" data-act="grupo-editar" data-id="' + g.id + '"><div class="name"><b>' + esc(g.nombre) + '</b><small>' + [g.escuela, g.ciclo, g.maestra || 'Sin docente asignado'].filter(Boolean).map(esc).join(' · ') + '</small></div>' + (g.activo ? '' : '<span class="badge off">Inactivo</span>') + '<span>›</span></div>';
       }).join('') + '</div>';
     return html;
   }
 
   function modalUsuario(u) {
-    u = u || { rol: 'maestra', activo: true };
+    u = u || { rol: '', activo: true };
     openModal('<div class="row"><h2 class="grow">' + (u.id ? 'Editar usuario' : 'Nuevo usuario') + '</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div><form id="form-usuario" class="stack">' +
       '<label class="field"><span>Usuario (para entrar)</span><input type="text" name="usuario" value="' + esc(u.usuario || '') + '" ' + (u.id ? 'disabled' : 'required') + ' autocapitalize="none" placeholder="adriana"></label>' +
       '<label class="field"><span>Nombre</span><input type="text" name="nombre" value="' + esc(u.nombre || '') + '" required></label>' +
-      '<label class="field"><span>Rol</span><select name="rol"><option value="maestra"' + (u.rol === 'maestra' ? ' selected' : '') + '>Maestra</option><option value="admin"' + (u.rol === 'admin' ? ' selected' : '') + '>Administrador</option></select></label>' +
+      '<label class="field"><span>Rol</span><select name="rol" required>' + (u.id ? '' : '<option value="">— Elige —</option>') + '<option value="maestra"' + (u.rol === 'maestra' ? ' selected' : '') + '>Maestra</option><option value="maestro"' + (u.rol === 'maestro' ? ' selected' : '') + '>Maestro</option><option value="admin"' + (u.rol === 'admin' ? ' selected' : '') + '>Administrador</option></select></label>' +
       '<label class="field"><span>' + (u.id ? 'Nueva contraseña (déjalo vacío para no cambiarla)' : 'Contraseña inicial (mínimo 8)') + '</span><input type="text" name="password" autocomplete="off"' + (u.id ? '' : ' required minlength="8"') + '></label>' +
       '<label class="row"><input type="checkbox" name="activo"' + (u.activo ? ' checked' : '') + '> Activo (puede entrar)</label>' +
       '<button class="btn primary block" type="submit">Guardar</button></form>' +
@@ -684,7 +684,7 @@
         '<label class="field grow"><span>Grupo</span><input type="text" name="letra" value="' + esc(g.letra || '') + '" maxlength="3" placeholder="D" required style="text-transform:uppercase"></label></div>' +
         '<label class="field"><span>Ciclo escolar</span><input type="text" name="ciclo" value="' + esc(g.ciclo || '') + '" placeholder="2026-2027"></label>' +
         '<label class="field"><span>Escuela</span><select name="escuelaId" data-change="escuela-select">' + escuelaOptions(g.escuelaId) + '</select></label>' +
-        (esAdmin ? '<label class="field"><span>Maestra asignada</span><select name="usuarioId"><option value="">— Sin asignar —</option>' + users.map(function (u) {
+        (esAdmin ? '<label class="field"><span>Docente asignado</span><select name="usuarioId"><option value="">— Sin asignar —</option>' + users.map(function (u) {
           return '<option value="' + u.id + '"' + (u.id === g.usuarioId ? ' selected' : '') + '>' + esc(u.nombre) + ' (@' + esc(u.usuario) + ')</option>';
         }).join('') + '</select></label>' : '') +
         '<label class="row"><input type="checkbox" name="activo"' + (g.activo ? ' checked' : '') + '> Activo (desmárcalo para archivar el grupo al terminar el ciclo)</label>' +
@@ -1020,7 +1020,7 @@
       var borrarGrupos = false;
       if (suyos.length) {
         borrarGrupos = confirm(u.nombre + ' tiene ' + suyos.length + ' grupo(s): ' + suyos.map(function (g) { return g.nombre; }).join(', ') +
-          '.\n\nAceptar = eliminar también esos grupos con TODOS sus datos.\nCancelar = conservar los grupos sin maestra asignada (podrás reasignarlos).');
+          '.\n\nAceptar = eliminar también esos grupos con TODOS sus datos.\nCancelar = conservar los grupos sin docente asignado (podrás reasignarlos).');
       }
       var r = prompt('Vas a ELIMINAR al usuario @' + u.usuario + (borrarGrupos ? ' y sus ' + suyos.length + ' grupo(s)' : '') + '. No se puede deshacer.\n\nEscribe ELIMINAR para confirmar:');
       if (r === null) return;

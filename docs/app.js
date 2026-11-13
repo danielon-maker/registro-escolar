@@ -142,7 +142,7 @@
         var futuro = p.inicio > today();
         return '<option value="' + p.id + '"' + (p.id === S.periodoId ? ' selected' : '') + (futuro ? ' disabled' : '') + '>' + esc(p.nombre) + (futuro ? ' (aún no)' : '') + '</option>';
       }).join('') + '</select>' : '') +
-      (S.grupoId && (S.groups.length > 1 || S.user.rol === 'admin') ? '<button class="icon-btn" data-act="cambiar-grupo" title="Cambiar grupo">⇄</button>' : '') +
+      (S.grupoId ? '<button class="icon-btn" data-act="cambiar-grupo" title="Mis grupos" aria-label="Mis grupos">⇄</button>' : '') +
       '</header>';
     var nav = '';
     if (withNav) {
@@ -444,6 +444,7 @@
     var items = [
       ['disciplina', '⭐', 'Disciplina', 'Puntos por periodo'],
       ['diagnostico', '🧾', 'Resultados de exámenes', 'Diagnóstico y trimestrales por campo'],
+      ['grupos', '🗂️', 'Mis grupos', 'Cambiar de grupo o crear uno nuevo'],
       ['grupo', '🏫', 'Mi grupo y escuela', 'Grado, grupo, ciclo escolar y escuela'],
       ['materias', '📚', 'Materias', 'Agregar, renombrar u ocultar materias'],
       ['alumnos', '👧', 'Alumnos', 'Lista, altas y bajas'],
@@ -794,7 +795,8 @@
     mas: function (el) {
       if (!confirmLeave()) return;
       if (S.view !== 'mas') S.view = 'mas'; S.mas = el.dataset.v || null; S.matEdit = null;
-      if (S.mas === 'aviso') { S.mas = null; window.open('aviso-privacidad.html', '_blank'); return; } if (S.mas === 'admin') S.admin.users = null; S.disc.key = null; S.carga.key = null; render(); window.scrollTo(0, 0); },
+      if (S.mas === 'aviso') { S.mas = null; window.open('aviso-privacidad.html', '_blank'); return; }
+      if (S.mas === 'grupos') { S.mas = null; S.view = 'grupos'; render(); window.scrollTo(0, 0); return; } if (S.mas === 'admin') S.admin.users = null; S.disc.key = null; S.carga.key = null; render(); window.scrollTo(0, 0); },
 
     // Asistencia
     'asis-dia': function (el) {

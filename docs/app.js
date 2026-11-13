@@ -103,7 +103,8 @@
     return api('getGroupData', { grupoId: S.grupoId }).then(function (d) {
       S.data = d;
       if (!S.periodoId || !d.periodos.some(function (p) { return p.id === S.periodoId; })) {
-        var p = periodoDeFecha(today()) || d.periodos[d.periodos.length - 1];
+        var iniciados = d.periodos.filter(function (x) { return x.inicio <= today(); });
+        var p = periodoDeFecha(today()) || iniciados[iniciados.length - 1] || d.periodos[0];
         S.periodoId = p ? p.id : null;
       }
       S.loading = false;
@@ -138,7 +139,8 @@
     var top = '<header class="topbar">' +
       '<div class="title"><b>' + esc(g ? g.nombre : (CFG.NOMBRE_APP || 'Registro Escolar')) + '</b><span>' + esc(g && g.escuela ? g.escuela : S.user.nombre) + (g && g.ciclo ? ' · ' + esc(g.ciclo) : '') + '</span></div>' +
       (periodos.length ? '<select data-change="periodo" aria-label="Periodo">' + periodos.map(function (p) {
-        return '<option value="' + p.id + '"' + (p.id === S.periodoId ? ' selected' : '') + '>' + esc(p.nombre) + '</option>';
+        var futuro = p.inicio > today();
+        return '<option value="' + p.id + '"' + (p.id === S.periodoId ? ' selected' : '') + (futuro ? ' disabled' : '') + '>' + esc(p.nombre) + (futuro ? ' (aún no)' : '') + '</option>';
       }).join('') + '</select>' : '') +
       (S.grupoId && (S.groups.length > 1 || S.user.rol === 'admin') ? '<button class="icon-btn" data-act="cambiar-grupo" title="Cambiar grupo">⇄</button>' : '') +
       '</header>';
@@ -210,7 +212,11 @@
 
   // ===================== Asistencia =====================
   function ensureAsis(fecha) {
-    fecha = fecha || (S.asis && S.asis.fecha) || today();
+    if (!fecha && !(S.asis && S.asis.fecha)) {
+      fecha = today();
+      while ([0, 6].indexOf(new Date(fecha + 'T12:00:00').getDay()) >= 0) fecha = addDays(fecha, -1);
+    }
+    fecha = fecha || S.asis.fecha;
     var rec = {};
     S.data.asistencia.forEach(function (r) { if (r[0] === fecha) rec[r[1]] = r[2]; });
     var saved = Object.keys(rec).length > 0;
@@ -229,12 +235,14 @@
 
     var html = '<div class="card"><div class="row nowrap">' +
       '<button class="icon-btn" data-act="asis-dia" data-d="-1">‹</button>' +
-      '<input type="date" class="grow" value="' + f + '" data-change="asis-fecha">' +
+      '<input type="date" class="grow" value="' + f + '" data-change="asis-fecha" min="' + (S.data.periodos[0] ? S.data.periodos[0].inicio : '') + '" max="' + today() + '">' +
       '<button class="icon-btn" data-act="asis-dia" data-d="1">›</button></div>' +
       '<div class="muted small" style="margin-top:6px">' + esc(fmtDate(f)) + ' · ' + (p ? esc(p.nombre) : 'Fuera de los periodos configurados') +
-      (A.saved ? ' · <b style="color:var(--ok)">Guardada</b>' : ' · <b style="color:var(--warn)">Sin capturar</b>') + '</div></div>';
+      (f > today() || dow === 0 || dow === 6 || !p || sinClase ? '' : A.saved ? ' · <b style="color:var(--ok)">Guardada</b>' : ' · <b style="color:var(--warn)">Sin capturar</b>') + '</div></div>';
 
-    if (dow === 0 || dow === 6) html += '<div class="banner info">Es fin de semana.</div>';
+    if (f > today()) return html + '<div class="banner warn">Ese día todavía no llega; no se puede pasar lista por adelantado.</div><button class="btn block" data-act="asis-hoy">Ir a hoy</button>';
+    if (dow === 0 || dow === 6) return html + '<div class="banner info">Es fin de semana, no hay clases.</div><button class="btn block" data-act="asis-hoy">Ir a hoy</button>';
+    if (!p) return html + '<div class="banner warn">Esta fecha está fuera del ciclo escolar (ningún trimestre la incluye).</div><button class="btn block" data-act="asis-hoy">Ir a hoy</button>';
 
     if (sinClase) {
       html += '<div class="banner warn"><b>Día sin clase:</b> ' + esc(sinClase.motivo) + '<br><span class="small">No cuenta para asistencias.</span></div>' +
@@ -298,7 +306,9 @@
     var e = a && a.id ? (ix.entregas[a.id] || {}) : {};
     var valores = {};
     alumnosActivos().forEach(function (al) { valores[al.id] = a && a.id && e[al.id] != null ? Number(e[al.id]) : 1; });
-    S.trab.editing = { id: a && a.id, titulo: a ? a.titulo : '', fecha: a ? a.fecha : today(), campo: a ? a.campo : S.trab.campo, valores: valores };
+    var per = periodo(), fDef = today();
+    if (per && (fDef < per.inicio || fDef > per.fin)) fDef = per.fin < today() ? per.fin : per.inicio;
+    S.trab.editing = { id: a && a.id, titulo: a ? a.titulo : '', fecha: a ? a.fecha : fDef, campo: a ? a.campo : S.trab.campo, valores: valores };
     S.dirty = !(a && a.id);
   }
 
@@ -308,7 +318,7 @@
     Object.keys(E.valores).forEach(function (k) { hechos += E.valores[k]; });
     var html = '<div class="row" style="margin-bottom:8px"><button class="btn ghost" data-act="trab-volver">‹ Volver</button><span class="grow"></span><span class="badge">' + esc(campoNombre(E.campo)) + '</span></div>' +
       '<div class="card stack"><label class="field"><span>Nombre de la actividad</span><input type="text" data-input="trab-titulo" value="' + esc(E.titulo) + '" placeholder="Ej: Sustantivos y adjetivos"></label>' +
-      '<label class="field"><span>Fecha</span><input type="date" data-input="trab-fecha" value="' + E.fecha + '"></label></div>' +
+      '<label class="field"><span>Fecha</span><input type="date" data-input="trab-fecha" value="' + E.fecha + '"' + (periodo() ? ' min="' + periodo().inicio + '" max="' + periodo().fin + '"' : '') + '></label></div>' +
       '<p class="muted small">Todos inician como “Entregó”. Toca para cambiar: Entregó → No → Medio.</p>' +
       '<div class="row" style="margin-bottom:10px"><span class="grow"><b>' + fmt1(hechos).replace('.0', '') + '</b> de ' + alumnosActivos().length + ' entregaron</span><button class="btn" data-act="trab-todos">Todos entregaron</button></div>' +
       '<div class="list">' + alumnosActivos().map(function (a) {
@@ -482,19 +492,30 @@
     return html;
   }
 
+  var ESTADO_ALUMNO = { activo: 'Activo', baja: 'Baja', transferencia: 'Transferencia' };
+
   function viewAlumnos() {
-    var all = S.data.alumnos;
-    return '<h2>Alumnos (' + alumnosActivos().length + ' activos)</h2>' +
-      '<div class="list">' + all.map(function (a) {
-        return '<div class="item clickable" data-act="alumno-editar" data-id="' + a.id + '"><span class="num">' + a.num + '</span><div class="name">' + esc(a.nombre) + '</div>' + (a.activo ? '' : '<span class="badge off">Baja</span>') + '<span>›</span></div>';
-      }).join('') + '</div>' +
-      '<div class="card stack" style="margin-top:14px"><h3>Agregar alumnos</h3><p class="muted small">Pega uno o varios nombres, uno por renglón (APELLIDOS NOMBRES). Se agregan al final de la lista.</p>' +
-      '<textarea id="nuevos-alumnos" placeholder="PEREZ LOPEZ MARIA FERNANDA"></textarea><button class="btn primary" data-act="alumnos-agregar">Agregar</button></div>';
+    var all = S.data.alumnos.slice().sort(function (a, b) { return a.num - b.num; });
+    var activos = all.filter(function (a) { return a.activo; });
+    var otros = all.filter(function (a) { return !a.activo; });
+    var fila = function (a) {
+      return '<div class="item clickable" data-act="alumno-editar" data-id="' + a.id + '"><span class="num">' + (a.activo ? a.num : '') + '</span><div class="name">' + esc(a.nombre) +
+        (a.activo ? '' : '<small>' + ESTADO_ALUMNO[a.estado] + (a.fechaBaja ? ' · ' + esc(fmtDate(a.fechaBaja)) : '') + (a.nota ? ' · ' + esc(a.nota) : '') + '</small>') + '</div>' +
+        (a.activo ? '' : '<span class="badge off">' + ESTADO_ALUMNO[a.estado] + '</span>') + '<span>›</span></div>';
+    };
+    return '<h2>Alumnos (' + activos.length + ' activos)</h2><p class="muted small">La lista se ordena sola por orden alfabético (apellido paterno, materno y nombre) cada vez que agregas o corriges un alumno.</p>' +
+      '<div class="list">' + (activos.length ? activos.map(fila).join('') : '<div class="item muted">Sin alumnos activos</div>') + '</div>' +
+      (otros.length ? '<h3 style="margin-top:16px">Bajas y transferencias (' + otros.length + ')</h3><p class="muted small">Ya no aparecen en la lista ni en las calificaciones, pero su historial se conserva.</p><div class="list">' + otros.map(fila).join('') + '</div>' : '') +
+      '<div class="card stack" style="margin-top:14px"><h3>Agregar alumnos</h3><p class="muted small">Pega uno o varios nombres, uno por renglón, empezando por los apellidos. Se acomodan en orden alfabético automáticamente.</p>' +
+      '<textarea id="nuevos-alumnos" placeholder="PEREZ LOPEZ MARIA FERNANDA" autocapitalize="characters" spellcheck="false"></textarea><button class="btn primary" data-act="alumnos-agregar">Agregar</button></div>';
   }
 
   function viewPeriodos() {
     var w = S.data.grupo.pesos;
-    var html = '<h2>Periodos</h2><p class="muted small">Las asistencias, trabajos y exámenes se agrupan por estas fechas.</p><div id="periodos">' +
+    var sep = S.data.grupo.calendarioSep;
+    var html = '<h2>Periodos</h2><p class="muted small">Las asistencias, trabajos y exámenes se agrupan por estas fechas. Un trimestre que todavía no empieza no se puede seleccionar.</p>' +
+      (sep ? '<div class="card"><b>Calendario oficial SEP ' + esc(S.data.grupo.ciclo) + '</b><p class="muted small" style="margin:4px 0 10px">Pone las fechas oficiales de T1, T2 y T3 y marca los días sin clase (CTE, suspensiones y vacaciones). Lo que ya capturaste se conserva.</p><button class="btn primary" data-act="aplicar-sep">Usar calendario SEP</button></div>' : '') +
+      '<div id="periodos">' +
       S.data.periodos.map(function (p) { return periodoRow(p); }).join('') + '</div>' +
       '<div class="row" style="margin:10px 0 18px"><button class="btn" data-act="periodo-agregar">+ Agregar periodo</button><button class="btn primary" data-act="periodos-guardar">Guardar periodos</button></div>' +
       '<h2>Porcentajes de la calificación</h2><div class="card stack">' +
@@ -663,23 +684,41 @@
         return '<div class="card" style="' + (m.activo ? '' : 'opacity:.6') + '"><label class="field"><span>Nombre</span><input type="text" data-input="mat-nombre" data-i="' + i + '" value="' + esc(m.nombre) + '" placeholder="Ej: Inglés"></label>' +
           '<div class="row nowrap" style="margin-top:8px"><label class="field grow"><span>Nombre corto</span><input type="text" maxlength="20" data-input="mat-corto" data-i="' + i + '" value="' + esc(m.corto) + '"></label>' +
           '<button class="icon-btn" data-act="mat-mover" data-i="' + i + '" data-d="-1" title="Subir">↑</button><button class="icon-btn" data-act="mat-mover" data-i="' + i + '" data-d="1" title="Bajar">↓</button></div>' +
-          '<label class="row small" style="margin-top:8px"><input type="checkbox" data-act="mat-activo" data-i="' + i + '"' + (m.activo ? ' checked' : '') + '> Visible</label></div>';
+          '<div class="row" style="margin-top:8px"><label class="row small grow"><input type="checkbox" data-act="mat-activo" data-i="' + i + '"' + (m.activo ? ' checked' : '') + '> Visible</label>' +
+          (m.clave ? '<button class="btn ghost small" style="color:var(--bad)" data-act="mat-eliminar" data-clave="' + esc(m.clave) + '">Eliminar</button>' : '<button class="btn ghost small" style="color:var(--bad)" data-act="mat-quitar-nueva" data-i="' + i + '">Quitar</button>') + '</div></div>';
       }).join('') +
       '<div class="row" style="margin-top:6px"><button class="btn" data-act="mat-agregar">+ Agregar materia</button></div>' +
+      '<p class="muted small" style="margin-top:10px"><b>Ocultar</b> (quitar “Visible”) conserva lo capturado y puedes volver a mostrarla. <b>Eliminar</b> borra la materia y todos sus trabajos y exámenes para siempre.</p>' +
       '<div class="sticky-actions"><div class="inner"><button class="btn primary" data-act="mat-guardar">Guardar materias</button></div></div>';
   }
 
   function modalAlumno(a) {
+    var estadoSel = a.estado || (a.activo ? 'activo' : 'baja');
     openModal('<div class="row"><h2 class="grow">Editar alumno</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div><form id="form-alumno" class="stack">' +
-      '<label class="field"><span>Número de lista</span><input type="number" name="num" value="' + a.num + '" required></label>' +
-      '<label class="field"><span>Nombre completo</span><input type="text" name="nombre" value="' + esc(a.nombre) + '" required></label>' +
-      '<label class="row"><input type="checkbox" name="activo"' + (a.activo ? ' checked' : '') + '> Activo (desmarca si se dio de baja; su historial se conserva)</label>' +
+      '<label class="field"><span>Nombre completo (apellidos primero)</span><input type="text" name="nombre" value="' + esc(a.nombre) + '" required autocapitalize="characters" spellcheck="false"></label>' +
+      '<label class="field"><span>Situación</span><select name="estado" id="alumno-estado">' + Object.keys(ESTADO_ALUMNO).map(function (k) {
+        return '<option value="' + k + '"' + (k === estadoSel ? ' selected' : '') + '>' + ESTADO_ALUMNO[k] + '</option>';
+      }).join('') + '</select></label>' +
+      '<div id="alumno-baja" class="stack"' + (estadoSel === 'activo' ? ' hidden' : '') + '>' +
+      '<label class="field"><span>Fecha</span><input type="date" name="fechaBaja" value="' + esc(a.fechaBaja || today()) + '"></label>' +
+      '<label class="field"><span id="alumno-nota-label">' + (estadoSel === 'transferencia' ? 'Escuela o grupo de destino' : 'Motivo (opcional)') + '</span><input type="text" name="nota" maxlength="200" value="' + esc(a.nota || '') + '"></label>' +
+      '<p class="muted small">El alumno sale de la lista y de las calificaciones, pero su historial se conserva. Puedes reactivarlo cuando quieras.</p></div>' +
       '<button class="btn primary block" type="submit">Guardar</button></form>');
+    var sel = document.getElementById('alumno-estado');
+    sel.addEventListener('change', function () {
+      document.getElementById('alumno-baja').hidden = sel.value === 'activo';
+      document.getElementById('alumno-nota-label').textContent = sel.value === 'transferencia' ? 'Escuela o grupo de destino' : 'Motivo (opcional)';
+    });
     document.getElementById('form-alumno').addEventListener('submit', function (e) {
       e.preventDefault();
       var f = e.target;
-      busy(f.querySelector('button[type=submit]'), api('saveStudents', { grupoId: S.grupoId, alumnos: [{ id: a.id, num: Number(f.num.value), nombre: f.nombre.value, activo: f.activo.checked }] }), 'Alumno guardado')
-        .then(function () { closeModal(); return refresh(); });
+      var nombre = limpiarNombre(f.nombre.value);
+      if (!nombre) return toast('Escribe el nombre con letras', true);
+      var al = { id: a.id, nombre: nombre, estado: f.estado.value };
+      if (al.estado !== 'activo') { al.fechaBaja = f.fechaBaja.value; al.nota = f.nota.value; }
+      var msg = al.estado === 'activo' ? 'Alumno guardado' : (al.estado === 'baja' ? 'Alumno dado de baja' : 'Transferencia registrada');
+      busy(f.querySelector('button[type=submit]'), api('saveStudents', { grupoId: S.grupoId, alumnos: [al] }), msg)
+        .then(function () { closeModal(); S.asis = null; return refresh(); });
     });
   }
 
@@ -758,7 +797,19 @@
       if (S.mas === 'aviso') { S.mas = null; window.open('aviso-privacidad.html', '_blank'); return; } if (S.mas === 'admin') S.admin.users = null; S.disc.key = null; S.carga.key = null; render(); window.scrollTo(0, 0); },
 
     // Asistencia
-    'asis-dia': function (el) { if (!confirmLeave()) return; ensureAsis(addDays(S.asis.fecha, Number(el.dataset.d))); render(); },
+    'asis-dia': function (el) {
+      if (!confirmLeave()) return;
+      var d = Number(el.dataset.d), f = addDays(S.asis.fecha, d);
+      // Brinca fines de semana
+      while ([0, 6].indexOf(new Date(f + 'T12:00:00').getDay()) >= 0) f = addDays(f, d);
+      if (f > today()) return toast('No puedes pasar lista de días que todavía no llegan', true);
+      ensureAsis(f); render();
+    },
+    'asis-hoy': function () {
+      var f = today();
+      while ([0, 6].indexOf(new Date(f + 'T12:00:00').getDay()) >= 0) f = addDays(f, -1);
+      ensureAsis(f); render();
+    },
     'asis-toggle': function (el) { var id = el.dataset.id; S.asis.estados[id] = CICLO_ASIS[S.asis.estados[id]]; S.dirty = true; render(); },
     'asis-todos': function () { Object.keys(S.asis.estados).forEach(function (k) { S.asis.estados[k] = 'P'; }); S.dirty = true; render(); },
     'asis-guardar': function (el) {
@@ -798,6 +849,8 @@
     'trab-guardar': function (el) {
       var E = S.trab.editing;
       if (!E.titulo.trim()) return toast('Escribe el nombre de la actividad', true);
+      var per = periodo();
+      if (per && (E.fecha < per.inicio || E.fecha > per.fin)) return toast('La fecha debe estar dentro de ' + per.nombre + ' (' + fmtDate(per.inicio) + ' – ' + fmtDate(per.fin) + ')', true);
       var regs = Object.keys(E.valores).map(function (k) { return { alumnoId: k, valor: E.valores[k] }; });
       busy(el, api('saveActivity', { grupoId: S.grupoId, actividad: { id: E.id, campo: E.campo, fecha: E.fecha, titulo: E.titulo }, registros: regs }), 'Actividad guardada')
         .then(function () { S.dirty = false; S.trab.editing = null; return refresh(); });
@@ -852,14 +905,20 @@
     // Alumnos
     'alumno-editar': function (el) { modalAlumno(S.data.alumnos.filter(function (a) { return a.id === el.dataset.id; })[0]); },
     'alumnos-agregar': function (el) {
-      var lines = document.getElementById('nuevos-alumnos').value.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+      var lines = document.getElementById('nuevos-alumnos').value.split(/\n+/).map(limpiarNombre).filter(function (s) { return /[A-ZÀ-Þ]/.test(s); });
       if (!lines.length) return toast('Escribe al menos un nombre', true);
-      var max = S.data.alumnos.reduce(function (m, a) { return Math.max(m, a.num); }, 0);
-      var alumnos = lines.map(function (n, i) { return { nombre: n, num: max + i + 1 }; });
-      busy(el, api('saveStudents', { grupoId: S.grupoId, alumnos: alumnos }), lines.length + ' alumno(s) agregado(s)').then(refresh);
+      var alumnos = lines.map(function (n) { return { nombre: n }; });
+      busy(el, api('saveStudents', { grupoId: S.grupoId, alumnos: alumnos }), lines.length + ' alumno(s) agregado(s)').then(function () { S.asis = null; return refresh(); });
     },
 
     // Periodos
+    'aplicar-sep': function (el) {
+      if (!confirm('¿Aplicar el calendario oficial SEP? Se ajustarán las fechas de los trimestres y se marcarán los días sin clase.')) return;
+      busy(el, api('applySepCalendar', { grupoId: S.grupoId })).then(function (r) {
+        toast('Calendario aplicado: ' + r.diasAgregados + ' días sin clase marcados' + (r.omitidos.length ? ' (' + r.omitidos.length + ' ya tenían lista y se respetaron)' : ''));
+        S.periodoId = null; S.asis = null; return loadGroupData(true);
+      });
+    },
     'periodo-agregar': function () { document.getElementById('periodos').insertAdjacentHTML('beforeend', periodoRow({ nombre: 'T' + (document.querySelectorAll('.periodo').length + 1) })); },
     'periodos-guardar': function (el) {
       var ps = Array.prototype.map.call(document.querySelectorAll('.periodo'), function (c) {
@@ -890,6 +949,22 @@
       var i = Number(el.dataset.i), j = i + Number(el.dataset.d), L = S.matEdit;
       if (j < 0 || j >= L.length) return;
       var t = L[i]; L[i] = L[j]; L[j] = t; S.dirty = true; render();
+    },
+    'mat-quitar-nueva': function (el) { S.matEdit.splice(Number(el.dataset.i), 1); render(); },
+    'mat-eliminar': function (el) {
+      var clave = el.dataset.clave;
+      var m = S.data.materias.filter(function (x) { return x.clave === clave; })[0];
+      if (!m) return;
+      if (S.dirty && !confirm('Tienes cambios sin guardar en las materias; se perderán. ¿Continuar?')) return;
+      var acts = S.data.actividades.filter(function (a) { return a.campo === clave; }).length;
+      var exs = S.data.examenes.filter(function (x) { return x.campo === clave; }).length;
+      var detalle = acts || exs ? 'Se borrarán también ' + acts + ' actividad(es) y ' + exs + ' examen(es) con todas sus calificaciones.' : 'No tiene trabajos ni exámenes capturados.';
+      var r = prompt('Vas a ELIMINAR "' + m.nombre + '" para siempre. ' + detalle + '\n\nEsto no se puede deshacer. Si solo quieres que no aparezca, mejor desmarca "Visible".\n\nEscribe ELIMINAR para confirmar:');
+      if (r === null) return;
+      if (r.trim().toUpperCase() !== 'ELIMINAR') return toast('No se eliminó: no escribiste ELIMINAR', true);
+      busy(el, api('deleteMateria', { grupoId: S.grupoId, clave: clave }), 'Materia eliminada').then(function () {
+        S.dirty = false; S.matEdit = null; S.ex.key = null; S.carga.key = null; return refresh();
+      });
     },
     'mat-guardar': function (el) {
       var L = S.matEdit.filter(function (m) { return m.clave || m.nombre.trim(); });
@@ -924,6 +999,19 @@
       if (!confirmLeave()) { e.target.value = S.asis.fecha; return; }
       ensureAsis(e.target.value); render();
     }
+  });
+
+  // Nombres de alumnos: solo letras, espacios, guion y apóstrofo (sin números)
+  var NO_PERMITIDO_NOMBRE = /[^A-Za-zÀ-ÖØ-öø-ÿ\s'’-]/g;
+  function limpiarNombre(s) { return String(s || '').replace(/[0-9]/g, '').replace(NO_PERMITIDO_NOMBRE, ' ').replace(/[ \t]+/g, ' ').replace(/^[ \t'’-]+|[ \t'’-]+$/gm, '').toUpperCase(); }
+  document.addEventListener('input', function (e) {
+    var t = e.target;
+    if (t.id !== 'nuevos-alumnos' && !(t.name === 'nombre' && t.closest('#form-alumno'))) return;
+    if (!/[^A-Za-zÀ-ÖØ-öø-ÿ\s'’-]/.test(t.value)) return;
+    var pos = t.selectionStart, antes = t.value.length;
+    t.value = t.value.replace(NO_PERMITIDO_NOMBRE, '');
+    try { t.setSelectionRange(pos - (antes - t.value.length), pos - (antes - t.value.length)); } catch (err) { /* nada */ }
+    toast('Los nombres solo pueden llevar letras');
   });
 
   // Inputs que no re-renderizan (para no perder el foco)

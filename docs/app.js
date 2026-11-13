@@ -461,8 +461,12 @@
     if (!p) return '<div class="banner warn">Configura los periodos en Más → Periodos.</div>';
     var R = Calc.calcular(S.data, p.id);
     var w = S.data.grupo.pesos;
-    var tab = S.cal.tab === 'TODOS' ? 'TODOS' : (campoValido(S.cal.tab) === S.cal.tab ? S.cal.tab : 'TODOS');
+    var especiales = ['TODOS', 'GRAF', 'RIESGO'];
+    var tab = especiales.indexOf(S.cal.tab) >= 0 ? S.cal.tab : (campoValido(S.cal.tab) === S.cal.tab ? S.cal.tab : 'TODOS');
+    var enRiesgo = Calc.riesgo(S.data, p.id);
     var html = '<div class="chips" style="margin-bottom:10px"><button class="chip' + (tab === 'TODOS' ? ' active' : '') + '" data-act="cal-tab" data-v="TODOS">Resumen</button>' +
+      '<button class="chip' + (tab === 'RIESGO' ? ' active' : '') + '" data-act="cal-tab" data-v="RIESGO">⚠️ En riesgo (' + enRiesgo.length + ')</button>' +
+      '<button class="chip' + (tab === 'GRAF' ? ' active' : '') + '" data-act="cal-tab" data-v="GRAF">📊 Gráficas</button>' +
       CAMPOS().map(function (c) { return '<button class="chip' + (tab === c.id ? ' active' : '') + '" data-act="cal-tab" data-v="' + c.id + '">' + c.nombre + '</button>'; }).join('') + '</div>';
     html += '<div class="muted small" style="margin-bottom:4px">Toca a un alumno para ver su resumen completo.</div>';
     html += '<div class="muted small" style="margin-bottom:8px">' + esc(p.nombre) + ' · Examen ' + w.examen + '% · Trabajos ' + w.trabajos + '% · Asistencia ' + w.asistencia + '% · Disciplina ' + w.disciplina + '% · ' + R.posiblesAsis + ' días de clase</div>';
@@ -476,7 +480,10 @@
       if (falta) html += '<div class="banner warn small">Falta capturar <b>' + esc(k.nombre) + '</b> (' + falta + ' ' + (k.tipo === 'materia' ? 'calificaciones' : 'en total') + '; cuentan como 0). <a href="#" data-act="ir-concepto" data-v="' + esc(k.clave) + '">Capturar</a></div>';
     });
 
+    if (tab === 'RIESGO') return html + viewRiesgo(enRiesgo, p);
+    if (tab === 'GRAF') return html + viewGraficas(R, p);
     if (tab === 'TODOS') {
+      if (enRiesgo.length) html += '<div class="banner warn small">⚠️ <b>' + enRiesgo.length + ' alumno' + (enRiesgo.length === 1 ? '' : 's') + ' en riesgo</b> en ' + esc(p.nombre) + '. <a href="#" data-act="cal-tab" data-v="RIESGO">Ver quiénes y por qué</a></div>';
       html += '<div class="table-wrap"><table><thead><tr><th>#</th><th class="left">Alumno</th>' + CAMPOS().map(function (c) { return '<th>' + c.nombre.slice(0, 4) + '</th>'; }).join('') + '<th title="Disciplina (puntos)">⭐ Disc.</th><th>Prom.</th></tr></thead><tbody>' +
         R.alumnos.map(function (f) {
           var dp = f.disc.puntos;
@@ -501,6 +508,46 @@
         return '<tr><td class="left">' + c.nombre + '</td><td>' + d.bajo + '</td><td>' + d.medio + '</td><td>' + d.alto + '</td><td>' + gradeHtml(d.promedio) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     html += '<div style="margin-top:14px" class="row"><button class="btn primary grow" data-act="exportar">⬇ Descargar Excel</button></div>';
+    return html;
+  }
+
+  function viewRiesgo(lista, p) {
+    var U = Calc.UMBRALES;
+    var html = '<p class="muted small">Alumnos que en ' + esc(p.nombre) + ' tienen promedio menor a ' + U.promedio + ', alguna materia con menos de ' + U.materia + ', asistencia menor a ' + Math.round(U.asistencia * 100) + '%, entregan menos del ' + Math.round(U.trabajos * 100) + '% de los trabajos o faltaron a un examen. Primero los más graves.</p>';
+    if (!lista.length) return html + '<div class="banner ok">Ningún alumno en riesgo por ahora. 🎉</div>';
+    return html + '<div class="list">' + lista.map(function (r) {
+      var f = r.fila;
+      return '<div class="item clickable" data-act="cal-detalle" data-id="' + f.alumno.id + '"><span class="num">' + f.alumno.num + '</span><div class="name">' + esc(f.alumno.nombre) +
+        '<div>' + r.motivos.map(function (m) { return '<span class="riesgo-motivo' + (m.g ? '' : ' medio') + '">' + esc(m.t) + '</span>'; }).join('') + '</div></div>' +
+        gradeHtml(f.promedio) + '<span>›</span></div>';
+    }).join('') + '</div>';
+  }
+
+  function viewGraficas(R, p) {
+    var C = R.campos;
+    if (!C.length || !R.alumnos.length) return '<div class="banner info">Todavía no hay datos para graficar.</div>';
+    var html = '<div class="card"><h3>Distribución de calificaciones · ' + esc(p.nombre) + '</h3><p class="muted small" style="margin-top:0">Cuántos alumnos hay en cada rango, por materia.</p>' +
+      Graficas.apiladas({
+        titulo: 'Distribución de calificaciones',
+        categorias: C.map(function (c) { return c.nombre; }).concat(['Promedio']),
+        bandas: [
+          { nombre: '6 (menos de 6.5)', color: '--b-bajo', valores: C.map(function (c) { return R.resumen[c.id].bajo; }).concat([R.resumen.PROM.bajo]) },
+          { nombre: '7-8', color: '--b-medio', oscuro: true, valores: C.map(function (c) { return R.resumen[c.id].medio; }).concat([R.resumen.PROM.medio]) },
+          { nombre: '9-10', color: '--b-alto', valores: C.map(function (c) { return R.resumen[c.id].alto; }).concat([R.resumen.PROM.alto]) }
+        ]
+      }) + '</div>';
+    var diag = Calc.resultadosExamen(S.data, 'diagnostico'), tri = Calc.resultadosExamen(S.data, 'trimestral', p.id);
+    var hay = C.some(function (c) { return diag[c.id].examen || tri[c.id].examen; });
+    html += '<div class="card"><h3>Diagnóstico vs. examen ' + esc(p.nombre) + '</h3><p class="muted small" style="margin-top:0">Promedio del grupo en cada examen. La línea punteada marca 6.5.</p>' +
+      (hay ? Graficas.barrasH({
+        titulo: 'Diagnóstico contra examen del trimestre', max: 10, umbral: 6.5,
+        categorias: C.map(function (c) { return c.nombre; }),
+        series: [
+          { nombre: 'Diagnóstico', color: '--s1', valores: C.map(function (c) { return diag[c.id].resumen.promedio; }) },
+          { nombre: 'Examen ' + p.nombre, color: '--s2', valores: C.map(function (c) { return tri[c.id].resumen.promedio; }) }
+        ]
+      }) : '<p class="muted">Aún no hay exámenes capturados.</p>') + '</div>';
+    html += '<p class="muted small">Los números exactos están en la tabla de Distribución del Resumen y en Más → Resultados de exámenes.</p>';
     return html;
   }
 
@@ -565,6 +612,25 @@
       '<tr><td class="left"><b>Promedio</b></td>' + pers.map(function (x) { return '<td>' + (x.fila ? gradeHtml(x.fila.promedio) : '—') + '</td>'; }).join('') + '</tr></tbody></table></div>';
 
     if (!p || !Z.actual || !Z.actual.fila) return html;
+    var Ra = Z.actual.R;
+    html += '<div class="card" style="margin-top:12px"><h3>Comparado con el grupo · ' + esc(p.nombre) + '</h3>' + Graficas.barrasH({
+      titulo: 'Alumno contra promedio del grupo', max: 10, umbral: 6.5,
+      categorias: CAMPOS().map(function (c) { return c.nombre; }),
+      series: [
+        { nombre: 'Este alumno', color: '--s1', valores: CAMPOS().map(function (c) { return Z.actual.fila.campos[c.id].cal; }) },
+        { nombre: 'Promedio del grupo', color: '--s2', valores: CAMPOS().map(function (c) { return Ra.resumen[c.id].promedio; }) }
+      ]
+    }) + '</div>';
+    if (pers.length >= 2) {
+      html += '<div class="card"><h3>Avance por trimestre</h3>' + Graficas.lineas({
+        titulo: 'Promedio por trimestre', umbral: 6.5,
+        categorias: pers.map(function (x) { return x.periodo.nombre; }),
+        series: [
+          { nombre: 'Este alumno', color: '--s1', valores: pers.map(function (x) { return x.fila ? x.fila.promedio : null; }) },
+          { nombre: 'Promedio del grupo', color: '--s2', valores: pers.map(function (x) { return x.R.resumen.PROM.promedio; }) }
+        ]
+      }) + '</div>';
+    }
     var f = Z.actual.fila;
     html += '<h3 style="margin-top:16px">' + esc(p.nombre) + ' en detalle</h3>';
 
@@ -1133,7 +1199,7 @@
     'ir-disciplina': function () { if (!confirmLeave()) return; S.view = 'examenes'; S.ex.campo = 'DISC'; S.disc.key = null; render(); window.scrollTo(0, 0); },
 
     // Calificaciones
-    'cal-tab': function (el) { S.cal.tab = el.dataset.v; render(); },
+    'cal-tab': function (el) { S.cal.tab = el.dataset.v; render(); window.scrollTo(0, 0); },
     'cal-detalle': function (el) { abrirResumen(el.dataset.id); },
     'resumen-abrir': function (el) { abrirResumen(el.dataset.id); },
     'resumen-volver': function () { var v = S.resumen && S.resumen.volver; S.view = v ? v.view : 'calificaciones'; S.mas = v ? v.mas : null; render(); },

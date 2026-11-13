@@ -185,6 +185,32 @@
     return { porPeriodo: porPeriodo, actual: actual, faltas: asis.F, retardos: asis.R, justificadas: asis.J, pendientes: pendientes, diagnostico: diag };
   }
 
+  /**
+   * Alumnos en riesgo en un periodo. Criterios (UMBRALES):
+   *  promedio < 6.5 · alguna materia < 6 · asistencia < 90% · entrega < 80% de trabajos · faltó a algún examen del trimestre.
+   */
+  var UMBRALES = { promedio: 6.5, materia: 6, asistencia: 0.9, trabajos: 0.8 };
+  function riesgo(d, periodoId) {
+    var R = calcular(d, periodoId);
+    if (!R) return [];
+    var out = [];
+    R.alumnos.forEach(function (f) {
+      var m = [], grave = 0;
+      if (f.promedio != null && f.promedio < UMBRALES.promedio) { m.push({ t: 'Promedio ' + f1(f.promedio), g: true }); grave++; }
+      var bajas = R.campos.filter(function (c) { var v = f.campos[c.id].cal; return v != null && v < UMBRALES.materia; });
+      if (bajas.length) { m.push({ t: 'Menos de 6 en ' + bajas.map(function (c) { return c.nombre; }).join(', '), g: true }); grave++; }
+      if (f.asis.posibles && f.asis.asistio / f.asis.posibles < UMBRALES.asistencia) m.push({ t: 'Asistencia ' + Math.round(f.asis.asistio / f.asis.posibles * 100) + '%' });
+      var h = 0, pos = 0;
+      R.campos.forEach(function (c) { h += f.campos[c.id].trabajos.hechos; pos += f.campos[c.id].trabajos.posibles; });
+      if (pos && h / pos < UMBRALES.trabajos) m.push({ t: 'Entrega ' + Math.round(h / pos * 100) + '% de trabajos' });
+      var falto = R.campos.filter(function (c) { var e = f.campos[c.id].examen; return e.reactivos != null && e.aciertos == null; });
+      if (falto.length) m.push({ t: 'Faltó al examen de ' + falto.map(function (c) { return c.nombre; }).join(', ') });
+      if (m.length) out.push({ fila: f, motivos: m, grave: grave });
+    });
+    return out.sort(function (a, b) { return b.grave - a.grave || b.motivos.length - a.motivos.length || (a.fila.promedio || 0) - (b.fila.promedio || 0); });
+  }
+  function f1(n) { return (Math.round(n * 10) / 10).toFixed(1); }
+
   /** Resultados de un examen (diagnóstico o trimestral) por campo. */
   function resultadosExamen(d, tipo, periodoId) {
     var ix = indexar(d);
@@ -209,7 +235,7 @@
     return m;
   }
 
-  var api = { campos: campos, conceptos: conceptos, aplicaEn: aplicaEn, resumenAlumno: resumenAlumno, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
+  var api = { riesgo: riesgo, UMBRALES: UMBRALES, campos: campos, conceptos: conceptos, aplicaEn: aplicaEn, resumenAlumno: resumenAlumno, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
     asistenciasPeriodo: asistenciasPeriodo, indexar: indexar, examenDe: examenDe };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Calc = api;
 })(this);

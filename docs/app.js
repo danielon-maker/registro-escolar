@@ -2,7 +2,8 @@
 (function () {
   'use strict';
   var CFG = window.APP_CONFIG || {};
-  var CAMPOS = Calc.CAMPOS;
+  function CAMPOS() { return S.data ? Calc.campos(S.data) : []; }
+  function campoValido(id) { var c = CAMPOS(); return c.some(function (x) { return x.id === id; }) ? id : (c[0] && c[0].id); }
   var LS_KEY = 'registro_escolar_sesion';
 
   var ESTADOS = {
@@ -19,7 +20,7 @@
     token: null, user: null, groups: [], grupoId: null, data: null,
     view: 'asistencia', mas: null, periodoId: null, loading: false, dirty: false,
     asis: null, trab: { campo: 'LEN', editing: null }, ex: { tipo: 'trimestral', campo: 'LEN', key: null },
-    disc: { key: null }, carga: { concepto: 'ASIS', key: null }, cal: { tab: 'TODOS' }, admin: { users: null }
+    disc: { key: null }, carga: { concepto: 'ASIS', key: null }, cal: { tab: 'TODOS' }, admin: { users: null }, schools: null
   };
 
   var $app = document.getElementById('app');
@@ -36,7 +37,7 @@
   function fmt1(n) { return n == null || isNaN(n) ? '—' : (Math.round(n * 10) / 10).toFixed(1); }
   function nivel(c) { return c == null ? '' : c < 6.5 ? 'g-bajo' : c < 9 ? 'g-medio' : 'g-alto'; }
   function gradeHtml(c) { return '<span class="g ' + nivel(c) + '">' + fmt1(c) + '</span>'; }
-  function campoNombre(id) { return CAMPOS.filter(function (c) { return c.id === id; })[0].nombre; }
+  function campoNombre(id) { var c = CAMPOS().filter(function (x) { return x.id === id; })[0]; return c ? c.nombre : ''; }
   function alumnosActivos() { return S.data ? S.data.alumnos.filter(function (a) { return a.activo; }) : []; }
   function periodo() { return S.data && S.data.periodos.filter(function (p) { return p.id === S.periodoId; })[0]; }
   function periodoDeFecha(f) { return S.data.periodos.filter(function (p) { return f >= p.inicio && f <= p.fin; })[0]; }
@@ -116,6 +117,7 @@
   // ===================== Render principal =====================
   function render() {
     if (!S.token) return renderLogin();
+    if (S.user && !S.user.aceptoAviso) return renderAviso();
     if (!S.groupsLoaded) return renderShell('<div class="loading"><div class="spinner"></div>Cargando…</div>', false);
     if (!S.grupoId || S.view === 'grupos') return renderShell(viewGrupos(), false);
     if (S.loading || !S.data) return renderShell('<div class="loading"><div class="spinner"></div>Cargando grupo…</div>', true);
@@ -134,7 +136,7 @@
     var g = S.groups.filter(function (x) { return x.id === S.grupoId; })[0];
     var periodos = S.data && withNav ? S.data.periodos : [];
     var top = '<header class="topbar">' +
-      '<div class="title"><b>' + esc(g ? g.nombre : (CFG.NOMBRE_APP || 'Registro Escolar')) + '</b><span>' + esc(S.user.nombre) + (g && g.ciclo ? ' · ' + esc(g.ciclo) : '') + '</span></div>' +
+      '<div class="title"><b>' + esc(g ? g.nombre : (CFG.NOMBRE_APP || 'Registro Escolar')) + '</b><span>' + esc(g && g.escuela ? g.escuela : S.user.nombre) + (g && g.ciclo ? ' · ' + esc(g.ciclo) : '') + '</span></div>' +
       (periodos.length ? '<select data-change="periodo" aria-label="Periodo">' + periodos.map(function (p) {
         return '<option value="' + p.id + '"' + (p.id === S.periodoId ? ' selected' : '') + '>' + esc(p.nombre) + '</option>';
       }).join('') + '</select>' : '') +
@@ -157,7 +159,8 @@
       '<p class="muted">Entra con el usuario que te dio el administrador.</p>' +
       '<label class="field"><span>Usuario</span><input type="text" name="usuario" autocomplete="username" autocapitalize="none" required></label>' +
       '<label class="field"><span>Contraseña</span><input type="password" name="password" autocomplete="current-password" required></label>' +
-      '<button class="btn primary block" type="submit">Entrar</button></form></div>';
+      '<button class="btn primary block" type="submit">Entrar</button>' +
+      '<p class="muted small" style="text-align:center">Al usar la app aceptas el <a href="aviso-privacidad.html" target="_blank">aviso de privacidad</a>.</p></form></div>';
     document.getElementById('login-form').addEventListener('submit', function (e) {
       e.preventDefault();
       var f = e.target, btn = f.querySelector('button');
@@ -170,14 +173,35 @@
     });
   }
 
+  // ===================== Aviso de privacidad =====================
+  function renderAviso() {
+    $app.innerHTML = '<div class="login"><div class="card stack">' +
+      '<div class="logo">🔒</div><h2>Aviso de privacidad</h2>' +
+      '<p>En esta app vas a registrar datos de tus alumnos (nombres, asistencias y calificaciones), que son datos personales de menores de edad.</p>' +
+      '<ul class="small" style="padding-left:18px;margin:0"><li>Solo se usan para tu registro escolar y el cálculo de calificaciones.</li><li>No se venden ni se comparten con terceros.</li><li>Se guardan en una cuenta de Google privada del administrador.</li><li>Te comprometes a usarlos solo para fines escolares.</li></ul>' +
+      '<p class="small"><a href="aviso-privacidad.html" target="_blank">Leer el aviso de privacidad completo</a></p>' +
+      '<label class="row small"><input type="checkbox" id="acepto"> He leído y acepto el aviso de privacidad</label>' +
+      '<button class="btn primary block" id="btn-acepto">Continuar</button>' +
+      '<button class="btn ghost block" data-act="logout">Salir</button></div></div>';
+    document.getElementById('btn-acepto').addEventListener('click', function (e) {
+      if (!document.getElementById('acepto').checked) return toast('Marca la casilla para continuar', true);
+      busy(e.target, api('acceptPrivacy')).then(function () {
+        S.user.aceptoAviso = true; saveSession();
+        if (!S.groupsLoaded) return loadGroups().then(function () { render(); if (S.grupoId) loadGroupData(); });
+        render();
+      });
+    });
+  }
+
   // ===================== Grupos =====================
   function viewGrupos() {
     var gs = S.groups;
     var html = '<h2>Elige un grupo</h2>';
-    if (!gs.length) html += '<div class="banner info">Todavía no tienes grupos asignados.' + (S.user.rol === 'admin' ? ' Créalos en Administración.' : ' Pídele al administrador que te asigne uno.') + '</div>';
+    if (!gs.length) html += '<div class="banner info">Todavía no tienes grupos. Crea el tuyo con “+ Nuevo grupo”.</div>';
     html += '<div class="list menu-list">' + gs.map(function (g) {
-      return '<div class="item" data-act="elegir-grupo" data-id="' + g.id + '"><span class="ic">🏫</span><div class="name"><b>' + esc(g.nombre) + '</b><small>' + esc(g.ciclo || '') + (g.maestra ? ' · ' + esc(g.maestra) : '') + '</small></div>' + (g.activo ? '' : '<span class="badge off">Inactivo</span>') + '<span>›</span></div>';
+      return '<div class="item" data-act="elegir-grupo" data-id="' + g.id + '"><span class="ic">🏫</span><div class="name"><b>' + esc(g.nombre) + '</b><small>' + [g.escuela, g.ciclo, S.user.rol === 'admin' ? g.maestra : ''].filter(Boolean).map(esc).join(' · ') + '</small></div>' + (g.activo ? '' : '<span class="badge off">Archivado</span>') + '<span>›</span></div>';
     }).join('') + '</div>';
+    html += '<div style="margin-top:12px"><button class="btn primary block" data-act="grupo-nuevo">+ Nuevo grupo</button></div>';
     if (S.user.rol === 'admin') html += '<div style="margin-top:12px" class="list menu-list"><div class="item" data-act="admin-sin-grupo"><span class="ic">🔐</span><div class="name">Administración (usuarios y grupos)</div><span>›</span></div></div>';
     html += '<div style="margin-top:12px"><button class="btn ghost" data-act="logout">Cerrar sesión</button></div>';
     if (S.mas === 'admin' && S.view === 'grupos') html = viewAdmin(true);
@@ -218,6 +242,7 @@
       return html;
     }
 
+    if (!alumnosActivos().length) return html + '<div class="banner info">Este grupo todavía no tiene alumnos. Agrégalos en <b>Más → Alumnos</b> (puedes pegar la lista completa).</div><button class="btn primary block" data-act="mas" data-v="alumnos">Agregar alumnos</button>';
     var cuenta = { P: 0, F: 0, R: 0, J: 0 };
     Object.keys(A.estados).forEach(function (k) { cuenta[A.estados[k]]++; });
     html += '<div class="stats" style="margin-bottom:12px">' + ['P', 'F', 'R', 'J'].map(function (k) {
@@ -239,7 +264,7 @@
 
   // ===================== Trabajos =====================
   function campoChips(sel, act) {
-    return '<div class="chips">' + CAMPOS.map(function (c) {
+    return '<div class="chips">' + CAMPOS().map(function (c) {
       return '<button class="chip' + (c.id === sel ? ' active' : '') + '" data-act="' + act + '" data-v="' + c.id + '">' + c.nombre + '</button>';
     }).join('') + '</div>';
   }
@@ -247,6 +272,8 @@
   function viewTrabajos() {
     var T = S.trab;
     if (T.editing) return viewActividad();
+    T.campo = campoValido(T.campo);
+    if (!T.campo) return '<div class="banner warn">Este grupo no tiene materias activas. Agrégalas en Más → Materias.</div>';
     var p = periodo();
     var html = campoChips(T.campo, 'trab-campo');
     if (!p) return html + '<div class="banner warn">Configura los periodos en Más → Periodos.</div>';
@@ -309,6 +336,8 @@
 
   function viewExamenes() {
     var X = S.ex, p = periodo();
+    X.campo = campoValido(X.campo);
+    if (!X.campo) return '<div class="banner warn">Este grupo no tiene materias activas. Agrégalas en Más → Materias.</div>';
     if (X.tipo === 'trimestral' && !p) return '<div class="banner warn">Configura los periodos en Más → Periodos.</div>';
     cargarExamen();
     var html = '<div class="chips" style="margin-bottom:8px">' +
@@ -338,19 +367,19 @@
     if (!p) return '<div class="banner warn">Configura los periodos en Más → Periodos.</div>';
     var R = Calc.calcular(S.data, p.id);
     var w = S.data.grupo.pesos;
-    var tab = S.cal.tab;
+    var tab = S.cal.tab === 'TODOS' ? 'TODOS' : (campoValido(S.cal.tab) === S.cal.tab ? S.cal.tab : 'TODOS');
     var html = '<div class="chips" style="margin-bottom:10px"><button class="chip' + (tab === 'TODOS' ? ' active' : '') + '" data-act="cal-tab" data-v="TODOS">Resumen</button>' +
-      CAMPOS.map(function (c) { return '<button class="chip' + (tab === c.id ? ' active' : '') + '" data-act="cal-tab" data-v="' + c.id + '">' + c.nombre + '</button>'; }).join('') + '</div>';
+      CAMPOS().map(function (c) { return '<button class="chip' + (tab === c.id ? ' active' : '') + '" data-act="cal-tab" data-v="' + c.id + '">' + c.nombre + '</button>'; }).join('') + '</div>';
     html += '<div class="muted small" style="margin-bottom:8px">' + esc(p.nombre) + ' · Examen ' + w.examen + '% · Trabajos ' + w.trabajos + '% · Asistencia ' + w.asistencia + '% · Disciplina ' + w.disciplina + '% · ' + R.posiblesAsis + ' días de clase</div>';
 
     var sinDisc = R.alumnos.filter(function (f) { return f.disc.puntos == null; }).length;
     if (sinDisc) html += '<div class="banner warn small">' + sinDisc + ' alumnos sin puntos de disciplina en este periodo (cuentan como 0). Captúralos en Más → Disciplina.</div>';
 
     if (tab === 'TODOS') {
-      html += '<div class="table-wrap"><table><thead><tr><th>#</th><th class="left">Alumno</th>' + CAMPOS.map(function (c) { return '<th>' + c.nombre.slice(0, 4) + '</th>'; }).join('') + '<th>Prom.</th></tr></thead><tbody>' +
+      html += '<div class="table-wrap"><table><thead><tr><th>#</th><th class="left">Alumno</th>' + CAMPOS().map(function (c) { return '<th>' + c.nombre.slice(0, 4) + '</th>'; }).join('') + '<th>Prom.</th></tr></thead><tbody>' +
         R.alumnos.map(function (f) {
           return '<tr class="clickable" data-act="cal-detalle" data-id="' + f.alumno.id + '"><td>' + f.alumno.num + '</td><td class="name">' + esc(f.alumno.nombre) + '</td>' +
-            CAMPOS.map(function (c) { return '<td>' + gradeHtml(f.campos[c.id].cal) + '</td>'; }).join('') + '<td>' + gradeHtml(f.promedio) + '</td></tr>';
+            CAMPOS().map(function (c) { return '<td>' + gradeHtml(f.campos[c.id].cal) + '</td>'; }).join('') + '<td>' + gradeHtml(f.promedio) + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     } else {
       var pc = R.porCampo[tab];
@@ -362,7 +391,7 @@
     }
 
     html += '<h3 style="margin-top:16px">Distribución</h3><div class="table-wrap"><table><thead><tr><th class="left">Campo</th><th>6</th><th>7-8</th><th>9-10</th><th>Prom.</th></tr></thead><tbody>' +
-      CAMPOS.concat([{ id: 'PROM', nombre: 'Promedio general' }]).map(function (c) {
+      CAMPOS().concat([{ id: 'PROM', nombre: 'Promedio general' }]).map(function (c) {
         var d = R.resumen[c.id];
         return '<tr><td class="left">' + c.nombre + '</td><td>' + d.bajo + '</td><td>' + d.medio + '</td><td>' + d.alto + '</td><td>' + gradeHtml(d.promedio) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
@@ -377,7 +406,7 @@
     var w = S.data.grupo.pesos;
     var html = '<div class="row"><h2 class="grow">' + esc(f.alumno.nombre) + '</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div>' +
       '<p class="muted small">' + esc(R.periodo.nombre) + ' · Asistencias ' + f.asis.asistio + '/' + f.asis.posibles + ' · Disciplina ' + (f.disc.puntos == null ? 'sin capturar' : f.disc.puntos + '/' + f.disc.max) + '</p>';
-    CAMPOS.forEach(function (c) {
+    CAMPOS().forEach(function (c) {
       var x = f.campos[c.id];
       html += '<div class="card" style="background:#faf9ff"><div class="row"><b class="grow">' + c.nombre + '</b>' + gradeHtml(x.cal) + '</div><table style="margin-top:6px"><tbody>' +
         '<tr><td class="left">Examen (' + w.examen + '%)</td><td>' + (x.examen.reactivos == null ? 'Sin examen' : x.examen.aciertos == null ? 'Faltó' : x.examen.aciertos + '/' + x.examen.reactivos) + '</td><td>' + x.examen.pts.toFixed(2) + '</td></tr>' +
@@ -399,14 +428,19 @@
       case 'diagnostico': return back() + viewDiagnostico();
       case 'admin': return back() + viewAdmin(false);
       case 'password': return back() + viewPassword();
+      case 'grupo': return back() + viewMiGrupo();
+      case 'materias': return back() + viewMaterias();
     }
     var items = [
       ['disciplina', '⭐', 'Disciplina', 'Puntos por periodo'],
       ['diagnostico', '🧾', 'Resultados de exámenes', 'Diagnóstico y trimestrales por campo'],
+      ['grupo', '🏫', 'Mi grupo y escuela', 'Grado, grupo, ciclo escolar y escuela'],
+      ['materias', '📚', 'Materias', 'Agregar, renombrar u ocultar materias'],
       ['alumnos', '👧', 'Alumnos', 'Lista, altas y bajas'],
       ['periodos', '📅', 'Periodos y porcentajes', 'Trimestres y ponderación'],
       ['carga', '📥', 'Totales de la libreta', 'Lo que ya tenías registrado antes de la app'],
-      ['password', '🔑', 'Cambiar mi contraseña', '']
+      ['password', '🔑', 'Cambiar mi contraseña', ''],
+      ['aviso', '🔒', 'Aviso de privacidad', '']
     ];
     if (S.user.rol === 'admin') items.push(['admin', '🔐', 'Administración', 'Usuarios y grupos']);
     return '<div class="list menu-list">' + items.map(function (i) {
@@ -438,7 +472,7 @@
     tipos.forEach(function (t) {
       var r = Calc.resultadosExamen(S.data, t[0], t[2]);
       html += '<h3 style="margin-top:14px">' + esc(t[1]) + '</h3><div class="table-wrap"><table><thead><tr><th class="left">Campo</th><th>Reactivos</th><th>6</th><th>7-8</th><th>9-10</th><th>Prom.</th></tr></thead><tbody>' +
-        CAMPOS.map(function (c) {
+        CAMPOS().map(function (c) {
           var x = r[c.id];
           if (!x.examen) return '<tr><td class="left">' + c.nombre + '</td><td colspan="5" class="muted">Sin capturar</td></tr>';
           return '<tr><td class="left">' + c.nombre + '</td><td>' + x.examen.reactivos + '</td><td>' + x.resumen.bajo + '</td><td>' + x.resumen.medio + '</td><td>' + x.resumen.alto + '</td><td>' + gradeHtml(x.resumen.promedio) + '</td></tr>';
@@ -486,7 +520,7 @@
       alumnosActivos().forEach(function (a) { C.valores[a.id] = m[a.id] == null ? '' : m[a.id]; });
       C.key = key; S.dirty = false;
     }
-    var conceptos = [['ASIS', 'Asistencia']].concat(CAMPOS.map(function (c) { return ['TRAB_' + c.id, 'Trabajos ' + c.nombre]; }));
+    var conceptos = [['ASIS', 'Asistencia']].concat(CAMPOS().map(function (c) { return ['TRAB_' + c.id, 'Trabajos ' + c.nombre]; }));
     return '<h2>Totales de la libreta · ' + esc(p.nombre) + '</h2>' +
       '<div class="banner info small">Úsalo para lo que ya estaba registrado en la libreta antes de usar la app. Lo que captures día a día en la app se <b>suma</b> a estos totales. Si empiezas un periodo desde cero en la app, déjalo vacío.</div>' +
       '<div class="chips" style="margin-bottom:10px">' + conceptos.map(function (c) { return '<button class="chip' + (c[0] === C.concepto ? ' active' : '') + '" data-act="carga-concepto" data-v="' + c[0] + '">' + c[1] + '</button>'; }).join('') + '</div>' +
@@ -517,7 +551,7 @@
       }).join('') + '</div>' +
       '<div class="row" style="margin-top:18px"><h2 class="grow">Grupos</h2><button class="btn primary" data-act="grupo-nuevo">+ Grupo</button></div>' +
       '<div class="list">' + S.groups.map(function (g) {
-        return '<div class="item clickable" data-act="grupo-editar" data-id="' + g.id + '"><div class="name"><b>' + esc(g.nombre) + '</b><small>' + esc(g.ciclo || '') + ' · ' + esc(g.maestra || 'Sin maestra asignada') + '</small></div>' + (g.activo ? '' : '<span class="badge off">Inactivo</span>') + '<span>›</span></div>';
+        return '<div class="item clickable" data-act="grupo-editar" data-id="' + g.id + '"><div class="name"><b>' + esc(g.nombre) + '</b><small>' + [g.escuela, g.ciclo, g.maestra || 'Sin maestra asignada'].filter(Boolean).map(esc).join(' · ') + '</small></div>' + (g.activo ? '' : '<span class="badge off">Inactivo</span>') + '<span>›</span></div>';
       }).join('') + '</div>';
     return html;
   }
@@ -542,25 +576,97 @@
     });
   }
 
+  function loadSchools() {
+    return api('listSchools').then(function (l) { S.schools = l; return l; });
+  }
+
+  function escuelaOptions(sel) {
+    return '<option value="">— Sin escuela —</option>' + (S.schools || []).map(function (e) {
+      return '<option value="' + e.id + '"' + (e.id === sel ? ' selected' : '') + '>' + esc(e.nombre) + (e.cct ? ' (' + esc(e.cct) + ')' : '') + '</option>';
+    }).join('') + '<option value="__nueva">+ Registrar otra escuela…</option>';
+  }
+
+  function gradoOptions(sel) {
+    return [1, 2, 3, 4, 5, 6].map(function (n) { return '<option value="' + n + '"' + (String(n) === String(sel) ? ' selected' : '') + '>' + n + '°</option>'; }).join('');
+  }
+
+  function cicloActual() { var d = new Date(), y = d.getFullYear(); return d.getMonth() >= 7 ? y + '-' + (y + 1) : (y - 1) + '-' + y; }
+
   function modalGrupo(g) {
-    g = g || { activo: true };
-    var users = S.admin.users || [];
-    openModal('<div class="row"><h2 class="grow">' + (g.id ? 'Editar grupo' : 'Nuevo grupo') + '</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div><form id="form-grupo" class="stack">' +
-      '<label class="field"><span>Nombre del grupo</span><input type="text" name="nombre" value="' + esc(g.nombre || '') + '" required placeholder="6° D"></label>' +
-      '<label class="field"><span>Ciclo escolar</span><input type="text" name="ciclo" value="' + esc(g.ciclo || '') + '" placeholder="2026-2027"></label>' +
-      '<label class="field"><span>Maestra asignada</span><select name="usuarioId"><option value="">— Sin asignar —</option>' + users.map(function (u) {
-        return '<option value="' + u.id + '"' + (u.id === g.usuarioId ? ' selected' : '') + '>' + esc(u.nombre) + ' (@' + esc(u.usuario) + ')</option>';
-      }).join('') + '</select></label>' +
-      '<label class="row"><input type="checkbox" name="activo"' + (g.activo ? ' checked' : '') + '> Activo</label>' +
-      '<button class="btn primary block" type="submit">Guardar</button></form>');
-    document.getElementById('form-grupo').addEventListener('submit', function (e) {
-      e.preventDefault();
-      var f = e.target;
-      var p = { id: g.id, nombre: f.nombre.value, ciclo: f.ciclo.value, usuarioId: f.usuarioId.value, activo: f.activo.checked };
-      busy(f.querySelector('button[type=submit]'), api('saveGroup', p), 'Grupo guardado').then(function () {
-        closeModal(); return loadGroups();
-      }).then(render);
+    var esAdmin = S.user.rol === 'admin';
+    g = g || { activo: true, ciclo: cicloActual(), grado: '', letra: '' };
+    var ready = [loadSchools()];
+    if (esAdmin && !S.admin.users) ready.push(api('listUsers').then(function (u) { S.admin.users = u; }));
+    openModal('<div class="loading"><div class="spinner"></div></div>');
+    Promise.all(ready).then(function () {
+      var users = S.admin.users || [];
+      openModal('<div class="row"><h2 class="grow">' + (g.id ? 'Editar grupo' : 'Nuevo grupo') + '</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div><form id="form-grupo" class="stack" data-id="' + (g.id || '') + '">' +
+        '<div class="row nowrap"><label class="field grow"><span>Grado</span><select name="grado" required><option value="">—</option>' + gradoOptions(g.grado) + '</select></label>' +
+        '<label class="field grow"><span>Grupo</span><input type="text" name="letra" value="' + esc(g.letra || '') + '" maxlength="3" placeholder="D" required style="text-transform:uppercase"></label></div>' +
+        '<label class="field"><span>Ciclo escolar</span><input type="text" name="ciclo" value="' + esc(g.ciclo || '') + '" placeholder="2026-2027"></label>' +
+        '<label class="field"><span>Escuela</span><select name="escuelaId" data-change="escuela-select">' + escuelaOptions(g.escuelaId) + '</select></label>' +
+        (esAdmin ? '<label class="field"><span>Maestra asignada</span><select name="usuarioId"><option value="">— Sin asignar —</option>' + users.map(function (u) {
+          return '<option value="' + u.id + '"' + (u.id === g.usuarioId ? ' selected' : '') + '>' + esc(u.nombre) + ' (@' + esc(u.usuario) + ')</option>';
+        }).join('') + '</select></label>' : '') +
+        '<label class="row"><input type="checkbox" name="activo"' + (g.activo ? ' checked' : '') + '> Activo (desmárcalo para archivar el grupo al terminar el ciclo)</label>' +
+        '<button class="btn primary block" type="submit">Guardar</button></form>');
+      document.getElementById('form-grupo').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var f = e.target;
+        var p = { id: g.id, grado: f.grado.value, letra: f.letra.value, ciclo: f.ciclo.value.trim(), escuelaId: f.escuelaId.value === '__nueva' ? '' : f.escuelaId.value, activo: f.activo.checked };
+        if (esAdmin) p.usuarioId = f.usuarioId.value;
+        busy(f.querySelector('button[type=submit]'), api('saveGroup', p), 'Grupo guardado').then(function (r) {
+          closeModal();
+          var esNuevo = !g.id;
+          if (esNuevo && (!esAdmin || p.usuarioId === S.user.id || !p.usuarioId)) { S.grupoId = r.id; S.view = 'asistencia'; S.mas = null; S.data = null; S.periodoId = null; saveSession(); }
+          return loadGroups().then(function () { render(); return esNuevo && S.grupoId === r.id ? loadGroupData() : refresh(); });
+        });
+      });
+    }).catch(function (e) { closeModal(); toast(e.message, true); });
+  }
+
+  function modalEscuela(e, onSaved) {
+    e = e || {};
+    var turnos = ['Matutino', 'Vespertino', 'Tiempo completo', 'Nocturno', 'Discontinuo'];
+    openModal('<div class="row"><h2 class="grow">' + (e.id ? 'Editar escuela' : 'Registrar escuela') + '</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div><form id="form-escuela" class="stack">' +
+      '<label class="field"><span>Nombre de la escuela</span><input type="text" name="nombre" value="' + esc(e.nombre || '') + '" required placeholder="Esc. Prim. Benito Juárez"></label>' +
+      '<label class="field"><span>Clave de centro de trabajo (CCT), opcional</span><input type="text" name="cct" value="' + esc(e.cct || '') + '" placeholder="14DPR1234X" style="text-transform:uppercase"></label>' +
+      '<label class="field"><span>Turno</span><select name="turno"><option value="">—</option>' + turnos.map(function (t) { return '<option' + (t === e.turno ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></label>' +
+      '<label class="field"><span>Municipio</span><input type="text" name="municipio" value="' + esc(e.municipio || '') + '" placeholder="Zapopan"></label>' +
+      '<button class="btn primary block" type="submit">Guardar escuela</button></form>');
+    document.getElementById('form-escuela').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var f = ev.target;
+      busy(f.querySelector('button[type=submit]'), api('saveSchool', { id: e.id, nombre: f.nombre.value, cct: f.cct.value, turno: f.turno.value, municipio: f.municipio.value }), 'Escuela guardada')
+        .then(function (r) { closeModal(); if (onSaved) onSaved(r); });
     });
+  }
+
+  function viewMiGrupo() {
+    var G = S.data.grupo, E = S.data.escuela;
+    if (S.schools === null) { S.schools = undefined; loadSchools().then(render).catch(function (e) { toast(e.message, true); }); }
+    var puede = E && (S.schools || []).some(function (x) { return x.id === E.id && x.puedeEditar; });
+    return '<h2>Mi grupo</h2><div class="card"><div class="row"><div class="grow"><b style="font-size:1.2rem">' + esc(G.nombre) + '</b><div class="muted small">Ciclo ' + esc(G.ciclo || 'sin definir') + '</div></div>' +
+      '<button class="btn" data-act="mi-grupo-editar">Editar</button></div></div>' +
+      '<h2>Escuela</h2><div class="card">' + (E ?
+        '<b>' + esc(E.nombre) + '</b><div class="muted small">' + [E.cct, E.turno, E.municipio].filter(Boolean).map(esc).join(' · ') + '</div>' +
+        '<div class="row" style="margin-top:10px">' + (puede ? '<button class="btn" data-act="escuela-editar">Editar datos de la escuela</button>' : '') + '<button class="btn ghost" data-act="mi-grupo-editar">Cambiar de escuela</button></div>'
+        : '<p class="muted">Este grupo no tiene escuela asignada.</p><button class="btn primary" data-act="mi-grupo-editar">Asignar escuela</button>') + '</div>' +
+      '<p class="muted small">Los alumnos se editan en Más → Alumnos y las materias en Más → Materias.</p>';
+  }
+
+  function viewMaterias() {
+    if (!S.matEdit) S.matEdit = S.data.materias.map(function (m) { return { clave: m.clave, nombre: m.nombre, corto: m.corto, activo: m.activo }; });
+    var L = S.matEdit;
+    return '<h2>Materias</h2><p class="muted small">Cada materia tiene sus propios trabajos y exámenes. Ocultarla no borra lo que ya capturaste. El “nombre corto” se usa en botones y tablas.</p>' +
+      L.map(function (m, i) {
+        return '<div class="card" style="' + (m.activo ? '' : 'opacity:.6') + '"><label class="field"><span>Nombre</span><input type="text" data-input="mat-nombre" data-i="' + i + '" value="' + esc(m.nombre) + '" placeholder="Ej: Inglés"></label>' +
+          '<div class="row nowrap" style="margin-top:8px"><label class="field grow"><span>Nombre corto</span><input type="text" maxlength="20" data-input="mat-corto" data-i="' + i + '" value="' + esc(m.corto) + '"></label>' +
+          '<button class="icon-btn" data-act="mat-mover" data-i="' + i + '" data-d="-1" title="Subir">↑</button><button class="icon-btn" data-act="mat-mover" data-i="' + i + '" data-d="1" title="Bajar">↓</button></div>' +
+          '<label class="row small" style="margin-top:8px"><input type="checkbox" data-act="mat-activo" data-i="' + i + '"' + (m.activo ? ' checked' : '') + '> Visible</label></div>';
+      }).join('') +
+      '<div class="row" style="margin-top:6px"><button class="btn" data-act="mat-agregar">+ Agregar materia</button></div>' +
+      '<div class="sticky-actions"><div class="inner"><button class="btn primary" data-act="mat-guardar">Guardar materias</button></div></div>';
   }
 
   function modalAlumno(a) {
@@ -594,15 +700,21 @@
     var g = S.data.grupo;
     loadSheetJS().then(function () {
       var wb = XLSX.utils.book_new();
+      var usadas = {};
+      var nombreHoja = function (n) {
+        var base = String(n).toUpperCase().replace(/[\\\/\?\*\[\]:]/g, ' ').trim().slice(0, 28) || 'HOJA', k = base, i = 2;
+        while (usadas[k]) k = base + ' ' + i++;
+        usadas[k] = true; return k;
+      };
       var r2 = function (n) { return n == null ? '' : Math.round(n * 100) / 100; };
       // Resumen
-      var res = [['CALIFICACIONES ' + p.nombre + ' — ' + g.nombre + ' ' + (g.ciclo || '')], [], ['# LISTA', 'ALUMNO'].concat(CAMPOS.map(function (c) { return c.largo; })).concat(['PROMEDIO'])];
-      R.alumnos.forEach(function (f) { res.push([f.alumno.num, f.alumno.nombre].concat(CAMPOS.map(function (c) { return r2(f.campos[c.id].cal); })).concat([r2(f.promedio)])); });
+      var res = [['CALIFICACIONES ' + p.nombre + ' — ' + g.nombre + ' ' + (g.ciclo || '')], [S.data.escuela ? S.data.escuela.nombre + (S.data.escuela.cct ? ' · CCT ' + S.data.escuela.cct : '') : ''], ['# LISTA', 'ALUMNO'].concat(CAMPOS().map(function (c) { return c.largo; })).concat(['PROMEDIO'])];
+      R.alumnos.forEach(function (f) { res.push([f.alumno.num, f.alumno.nombre].concat(CAMPOS().map(function (c) { return r2(f.campos[c.id].cal); })).concat([r2(f.promedio)])); });
       res.push([], ['DISTRIBUCIÓN', '', 'CAL 6', 'CAL 7-8', 'CAL 9-10', 'PROMEDIO']);
-      CAMPOS.forEach(function (c) { var d = R.resumen[c.id]; res.push([c.largo, '', d.bajo, d.medio, d.alto, r2(d.promedio)]); });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(res), 'RESUMEN ' + p.nombre.slice(0, 20));
+      CAMPOS().forEach(function (c) { var d = R.resumen[c.id]; res.push([c.largo, '', d.bajo, d.medio, d.alto, r2(d.promedio)]); });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(res), nombreHoja('RESUMEN ' + p.nombre));
       // Una hoja por campo, mismo formato que el Excel original
-      CAMPOS.forEach(function (c) {
+      CAMPOS().forEach(function (c) {
         var pc = R.porCampo[c.id];
         var rows = [['CAMPO FORMATIVO DE ' + c.largo + ' — ' + p.nombre],
           ['# LISTA', 'ALUMNO', 'REACTIVOS', 'ACIERTOS', 'CALIFICACIÓN', 'EXAMEN ' + g.pesos.examen + '%', 'TRABAJOS REALIZADOS (de ' + pc.posibles + ')', 'TRABAJOS ' + g.pesos.trabajos + '%', 'ASISTENCIAS (de ' + R.posiblesAsis + ')', 'ASISTENCIA ' + g.pesos.asistencia + '%', 'DISCIPLINA (de ' + g.disciplinaMax + ')', 'DISCIPLINA ' + g.pesos.disciplina + '%', 'PROMEDIO']];
@@ -612,21 +724,21 @@
             x.examen.cal == null ? 'Faltó' : r2(x.examen.cal), r2(x.examen.pts), x.trabajos.hechos, r2(x.trabajos.pts), f.asis.asistio, r2(x.asistencia.pts),
             f.disc.puntos == null ? '' : f.disc.puntos, r2(x.disciplina.pts), r2(x.cal)]);
         });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), c.hoja);
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), nombreHoja(c.nombre));
       });
       // Diagnóstico
       var diag = Calc.resultadosExamen(S.data, 'diagnostico');
       var ix = Calc.indexar(S.data);
-      var drows = [['RESULTADOS EXAMEN DIAGNÓSTICO'], ['# LISTA', 'ALUMNO'].concat([].concat.apply([], CAMPOS.map(function (c) { return [c.nombre + ' REACTIVOS', 'ACIERTOS', 'CALIFICACIÓN']; })))];
+      var drows = [['RESULTADOS EXAMEN DIAGNÓSTICO'], ['# LISTA', 'ALUMNO'].concat([].concat.apply([], CAMPOS().map(function (c) { return [c.nombre + ' REACTIVOS', 'ACIERTOS', 'CALIFICACIÓN']; })))];
       alumnosActivos().forEach(function (a) {
         var row = [a.num, a.nombre];
-        CAMPOS.forEach(function (c) {
+        CAMPOS().forEach(function (c) {
           var ex = diag[c.id].examen, ac = ex ? (ix.resultados[ex.id] || {})[a.id] : null;
           row.push(ex ? ex.reactivos : '', ac == null ? '' : ac, ex && ac != null ? r2(ac / ex.reactivos * 10) : 'Faltó');
         });
         drows.push(row);
       });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(drows), 'DIAGNÓSTICO');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(drows), nombreHoja('DIAGNÓSTICO'));
       XLSX.writeFile(wb, 'Registro_' + g.nombre.replace(/[^\w]+/g, '_') + '_' + p.nombre.replace(/[^\w]+/g, '_') + '.xlsx');
     }).catch(function (e) { toast(e.message, true); });
   }
@@ -640,7 +752,10 @@
     'admin-salir': function () { S.mas = null; render(); },
     logout: function () { if (!confirmLeave()) return; api('logout').catch(function () {}); clearSession(); render(); },
     'cerrar-modal': closeModal,
-    mas: function (el) { if (!confirmLeave()) return; S.mas = el.dataset.v || null; if (S.mas === 'admin') S.admin.users = null; S.disc.key = null; S.carga.key = null; render(); window.scrollTo(0, 0); },
+    mas: function (el) {
+      if (!confirmLeave()) return;
+      if (S.view !== 'mas') S.view = 'mas'; S.mas = el.dataset.v || null; S.matEdit = null;
+      if (S.mas === 'aviso') { S.mas = null; window.open('aviso-privacidad.html', '_blank'); return; } if (S.mas === 'admin') S.admin.users = null; S.disc.key = null; S.carga.key = null; render(); window.scrollTo(0, 0); },
 
     // Asistencia
     'asis-dia': function (el) { if (!confirmLeave()) return; ensureAsis(addDays(S.asis.fecha, Number(el.dataset.d))); render(); },
@@ -768,18 +883,39 @@
     'usuario-nuevo': function () { modalUsuario(null); },
     'usuario-editar': function (el) { modalUsuario(S.admin.users.filter(function (u) { return u.id === el.dataset.id; })[0]); },
     'grupo-nuevo': function () { modalGrupo(null); },
+    'mi-grupo-editar': function () { var g = S.groups.filter(function (x) { return x.id === S.grupoId; })[0]; modalGrupo(g); },
+    'escuela-editar': function () { modalEscuela(S.data.escuela, function () { S.schools = null; loadGroups().then(refresh); }); },
+    'mat-agregar': function () { S.matEdit.push({ nombre: '', corto: '', activo: true }); S.dirty = true; render(); },
+    'mat-mover': function (el) {
+      var i = Number(el.dataset.i), j = i + Number(el.dataset.d), L = S.matEdit;
+      if (j < 0 || j >= L.length) return;
+      var t = L[i]; L[i] = L[j]; L[j] = t; S.dirty = true; render();
+    },
+    'mat-guardar': function (el) {
+      var L = S.matEdit.filter(function (m) { return m.clave || m.nombre.trim(); });
+      busy(el, api('saveMaterias', { grupoId: S.grupoId, materias: L }), 'Materias guardadas').then(function () { S.dirty = false; S.matEdit = null; return refresh(); });
+    },
     'grupo-editar': function (el) { modalGrupo(S.groups.filter(function (g) { return g.id === el.dataset.id; })[0]); }
   };
 
   document.addEventListener('click', function (e) {
     var el = e.target.closest('[data-act]');
     if (!el) return;
+    if (el.type === 'checkbox') return; // se maneja en 'change'
     var fn = actions[el.dataset.act];
     if (fn) { e.preventDefault(); fn(el); }
   });
 
   document.addEventListener('change', function (e) {
     var k = e.target.dataset.change;
+    if (e.target.dataset.act === 'mat-activo') { S.matEdit[Number(e.target.dataset.i)].activo = e.target.checked; S.dirty = true; render(); return; }
+    if (k === 'escuela-select' && e.target.value === '__nueva') {
+      // Conserva lo capturado en el formulario del grupo y abre el de escuela
+      var f = document.getElementById('form-grupo');
+      var borrador = { id: f.dataset.id || null, grado: f.grado.value, letra: f.letra.value, ciclo: f.ciclo.value, activo: f.activo.checked, usuarioId: f.usuarioId ? f.usuarioId.value : undefined };
+      modalEscuela(null, function (r) { S.schools = null; borrador.escuelaId = r.id; modalGrupo(borrador); });
+      return;
+    }
     if (k === 'periodo') {
       if (!confirmLeave()) { e.target.value = S.periodoId; return; }
       S.periodoId = e.target.value; S.ex.key = null; S.disc.key = null; S.carga.key = null; S.trab.editing = null; render();
@@ -806,6 +942,8 @@
     else if (k === 'disc') S.disc.valores[t.dataset.id] = t.value;
     else if (k === 'carga') S.carga.valores[t.dataset.id] = t.value;
     else if (k === 'carga-total') S.carga.total = t.value;
+    else if (k === 'mat-nombre') S.matEdit[Number(t.dataset.i)].nombre = t.value;
+    else if (k === 'mat-corto') S.matEdit[Number(t.dataset.i)].corto = t.value;
   });
 
   // Enter en aciertos pasa al siguiente alumno

@@ -3,12 +3,11 @@
  * Cada parte es (logrado / posible) × peso. El resultado se muestra en escala 0–10.
  */
 (function (root) {
-  var CAMPOS = [
-    { id: 'LEN', nombre: 'Lenguajes', largo: 'LENGUAJES', hoja: 'LENGUAJES' },
-    { id: 'SAB', nombre: 'Saberes', largo: 'SABERES Y PENSAMIENTO CIENTÍFICO', hoja: 'SABERES' },
-    { id: 'ETI', nombre: 'Ética', largo: 'ÉTICA, NATURALEZA Y SOCIEDAD', hoja: 'ÉTICA' },
-    { id: 'HUM', nombre: 'De lo Humano', largo: 'DE LO HUMANO Y LO COMUNITARIO', hoja: 'DE LO HUMANO' }
-  ];
+  /** Materias activas del grupo: { id, nombre (corto), largo }. */
+  function campos(d) {
+    return (d.materias || []).filter(function (m) { return m.activo; })
+      .map(function (m) { return { id: m.clave, nombre: m.corto || m.nombre, largo: String(m.nombre).toUpperCase() }; });
+  }
   var CUENTA_COMO_ASISTENCIA = { P: true, R: true, J: true };
 
   function inRange(f, p) { return f >= p.inicio && f <= p.fin; }
@@ -53,6 +52,7 @@
     var cargaAsis = ix.carga[p.id + '|ASIS'] || {};
     var posiblesAsis = dias.length + (Number(cargaAsis.TOTAL) || 0);
 
+    var CAMPOS = campos(d);
     var porCampo = {};
     CAMPOS.forEach(function (c) {
       var acts = d.actividades.filter(function (a) { return a.campo === c.id && inRange(a.fecha, p); });
@@ -74,7 +74,7 @@
       var rDisc = puntos == null ? 0 : puntos / dmax;
 
       var campos = {};
-      var suma = 0;
+      var suma = 0, n = 0;
       CAMPOS.forEach(function (c) {
         var pc = porCampo[c.id];
         var hechos = pc.acts.reduce(function (n, a) { return n + (Number((ix.entregas[a.id] || {})[al.id]) || 0); }, 0);
@@ -87,7 +87,9 @@
           if (aciertos == null) aciertos = null;
           rEx = aciertos == null ? 0 : aciertos / ex.reactivos;
         }
-        var cal = (rEx * w.examen + rTrab * w.trabajos + rAsis * w.asistencia + rDisc * w.disciplina) / 10;
+        // Materia sin examen ni trabajos en el periodo: no se califica (no baja el promedio)
+        var sinDatos = !ex && pc.posibles === 0;
+        var cal = sinDatos ? null : (rEx * w.examen + rTrab * w.trabajos + rAsis * w.asistencia + rDisc * w.disciplina) / 10;
         campos[c.id] = {
           examen: { reactivos: ex ? ex.reactivos : null, aciertos: aciertos, cal: ex && aciertos != null ? aciertos / ex.reactivos * 10 : null, pts: rEx * w.examen / 10 },
           trabajos: { hechos: hechos, posibles: pc.posibles, pts: rTrab * w.trabajos / 10 },
@@ -95,14 +97,14 @@
           disciplina: { pts: rDisc * w.disciplina / 10 },
           cal: cal
         };
-        suma += cal;
+        if (cal != null) { suma += cal; n++; }
       });
       return {
         alumno: al,
         asis: { asistio: asistio, posibles: posiblesAsis },
         disc: { puntos: puntos == null ? null : puntos, max: dmax },
         campos: campos,
-        promedio: suma / CAMPOS.length
+        promedio: n ? suma / n : null
       };
     });
 
@@ -110,7 +112,7 @@
     CAMPOS.forEach(function (c) { resumen[c.id] = distribucion(filas.map(function (f) { return f.campos[c.id].cal; })); });
     resumen.PROM = distribucion(filas.map(function (f) { return f.promedio; }));
 
-    return { periodo: p, dias: dias, posiblesAsis: posiblesAsis, porCampo: porCampo, alumnos: filas, resumen: resumen };
+    return { campos: CAMPOS, periodo: p, dias: dias, posiblesAsis: posiblesAsis, porCampo: porCampo, alumnos: filas, resumen: resumen };
   }
 
   /** Igual que el Excel: ≤6.49 → "6", 6.5–8.99 → "7-8", ≥9 → "9-10". */
@@ -130,7 +132,7 @@
   function resultadosExamen(d, tipo, periodoId) {
     var ix = indexar(d);
     var out = {};
-    CAMPOS.forEach(function (c) {
+    campos(d).forEach(function (c) {
       var ex = examenDe(d, periodoId, c.id, tipo);
       var cals = d.alumnos.filter(function (a) { return a.activo; }).map(function (a) {
         if (!ex) return null;
@@ -150,7 +152,7 @@
     return m;
   }
 
-  var api = { CAMPOS: CAMPOS, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
+  var api = { campos: campos, calcular: calcular, distribucion: distribucion, resultadosExamen: resultadosExamen,
     asistenciasPeriodo: asistenciasPeriodo, indexar: indexar, examenDe: examenDe };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Calc = api;
 })(this);

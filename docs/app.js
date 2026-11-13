@@ -642,7 +642,8 @@
       '<label class="field"><span>Rol</span><select name="rol"><option value="maestra"' + (u.rol === 'maestra' ? ' selected' : '') + '>Maestra</option><option value="admin"' + (u.rol === 'admin' ? ' selected' : '') + '>Administrador</option></select></label>' +
       '<label class="field"><span>' + (u.id ? 'Nueva contraseña (déjalo vacío para no cambiarla)' : 'Contraseña inicial (mínimo 8)') + '</span><input type="text" name="password" autocomplete="off"' + (u.id ? '' : ' required minlength="8"') + '></label>' +
       '<label class="row"><input type="checkbox" name="activo"' + (u.activo ? ' checked' : '') + '> Activo (puede entrar)</label>' +
-      '<button class="btn primary block" type="submit">Guardar</button></form>');
+      '<button class="btn primary block" type="submit">Guardar</button></form>' +
+      (u.id && u.id !== S.user.id ? '<div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px"><button class="btn danger block" data-act="usuario-eliminar" data-id="' + u.id + '">Eliminar usuario</button></div>' : ''));
     document.getElementById('form-usuario').addEventListener('submit', function (e) {
       e.preventDefault();
       var f = e.target;
@@ -687,7 +688,8 @@
           return '<option value="' + u.id + '"' + (u.id === g.usuarioId ? ' selected' : '') + '>' + esc(u.nombre) + ' (@' + esc(u.usuario) + ')</option>';
         }).join('') + '</select></label>' : '') +
         '<label class="row"><input type="checkbox" name="activo"' + (g.activo ? ' checked' : '') + '> Activo (desmárcalo para archivar el grupo al terminar el ciclo)</label>' +
-        '<button class="btn primary block" type="submit">Guardar</button></form>');
+        '<button class="btn primary block" type="submit">Guardar</button></form>' +
+        (esAdmin && g.id ? '<div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px"><button class="btn danger block" data-act="grupo-eliminar" data-id="' + g.id + '">Eliminar grupo</button></div>' : ''));
       document.getElementById('form-grupo').addEventListener('submit', function (e) {
         e.preventDefault();
         var f = e.target;
@@ -1011,6 +1013,40 @@
 
     // Admin
     'usuario-nuevo': function () { modalUsuario(null); },
+    'usuario-eliminar': function (el) {
+      var u = (S.admin.users || []).filter(function (x) { return x.id === el.dataset.id; })[0];
+      if (!u) return;
+      var suyos = S.groups.filter(function (g) { return g.usuarioId === u.id; });
+      var borrarGrupos = false;
+      if (suyos.length) {
+        borrarGrupos = confirm(u.nombre + ' tiene ' + suyos.length + ' grupo(s): ' + suyos.map(function (g) { return g.nombre; }).join(', ') +
+          '.\n\nAceptar = eliminar también esos grupos con TODOS sus datos.\nCancelar = conservar los grupos sin maestra asignada (podrás reasignarlos).');
+      }
+      var r = prompt('Vas a ELIMINAR al usuario @' + u.usuario + (borrarGrupos ? ' y sus ' + suyos.length + ' grupo(s)' : '') + '. No se puede deshacer.\n\nEscribe ELIMINAR para confirmar:');
+      if (r === null) return;
+      if (r.trim().toUpperCase() !== 'ELIMINAR') return toast('No se eliminó: no escribiste ELIMINAR', true);
+      busy(el, api('deleteUser', { id: u.id, borrarGrupos: borrarGrupos })).then(function (res) {
+        toast('Usuario eliminado' + (res.gruposEliminados ? ' junto con ' + res.gruposEliminados + ' grupo(s)' : res.grupos ? '; sus grupos quedaron sin asignar' : ''));
+        closeModal(); S.admin.users = null;
+        return loadGroups().then(function () { if (!S.grupoId) { S.data = null; S.view = 'grupos'; S.mas = 'admin'; } render(); });
+      });
+    },
+    'grupo-eliminar': function (el) {
+      var g = S.groups.filter(function (x) { return x.id === el.dataset.id; })[0];
+      if (!g) return;
+      var r = prompt('Vas a ELIMINAR el grupo ' + g.nombre + (g.escuela ? ' (' + g.escuela + ')' : '') + ' con TODOS sus alumnos, asistencias, trabajos, exámenes y calificaciones. No se puede deshacer.\n\nSi solo ya no se usa, mejor desmarca "Activo" para archivarlo.\n\nEscribe ELIMINAR para confirmar:');
+      if (r === null) return;
+      if (r.trim().toUpperCase() !== 'ELIMINAR') return toast('No se eliminó: no escribiste ELIMINAR', true);
+      busy(el, api('deleteGroup', { id: g.id })).then(function (res) {
+        toast('Grupo eliminado (' + res.alumnos + ' alumnos)');
+        closeModal();
+        if (S.grupoId === g.id) { S.grupoId = null; S.data = null; S.periodoId = null; saveSession(); }
+        return loadGroups().then(function () {
+          if (!S.grupoId) { S.view = 'grupos'; S.mas = 'admin'; }
+          render();
+        });
+      });
+    },
     'usuario-editar': function (el) { modalUsuario(S.admin.users.filter(function (u) { return u.id === el.dataset.id; })[0]); },
     'grupo-nuevo': function () { modalGrupo(null); },
     'mi-grupo-editar': function () { var g = S.groups.filter(function (x) { return x.id === S.grupoId; })[0]; modalGrupo(g); },

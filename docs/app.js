@@ -128,7 +128,7 @@
       case 'trabajos': html = viewTrabajos(); break;
       case 'examenes': html = viewExamenes(); break;
       case 'calificaciones': html = viewCalificaciones(); break;
-      case 'alumno': html = viewResumenAlumno(); break;
+      case 'alumno': html = '<div id="resumen-alumno">' + viewResumenAlumno() + '</div>'; break;
       default: html = viewMas();
     }
     renderShell(html, true);
@@ -362,7 +362,13 @@
     var cals = alumnosActivos().map(function (a) { var v = X.valores[a.id]; return v === '' || !r ? null : Number(v) / r * 10; });
     var d = Calc.distribucion(cals);
     html += '<div class="card" style="margin-top:12px"><div class="row nowrap"><label class="field grow"><span>Número de reactivos (preguntas)</span><input type="number" min="1" inputmode="numeric" data-input="ex-reactivos" value="' + esc(X.reactivos) + '"></label></div>' +
-      '<div class="muted small" style="margin-top:8px">Promedio: <b>' + fmt1(d.promedio) + '</b> · 6: ' + d.bajo + ' · 7-8: ' + d.medio + ' · 9-10: ' + d.alto + (X.existe ? '' : ' · <b style="color:var(--warn)">Sin capturar</b>') + '</div></div>';
+      '<div class="row nowrap" style="margin-top:8px"><span class="muted small grow">Promedio del grupo: ' + fmt1(d.promedio) + (X.existe ? '' : ' · <b style="color:var(--warn)">Sin capturar</b>') + '</span>' +
+      '<button class="icon-btn info-btn' + (S.ex.info ? ' active' : '') + '" data-act="ex-info" title="Alumnos por calificación" aria-label="Alumnos por calificación">ⓘ</button></div>' +
+      (S.ex.info ? '<div class="small" style="margin-top:8px"><div class="stats" style="grid-template-columns:repeat(3,1fr)">' +
+        '<div class="stat" style="background:var(--bad-bg)"><b style="color:var(--bad)">' + d.bajo + '</b><span>menos de 6.5</span></div>' +
+        '<div class="stat" style="background:var(--warn-bg)"><b style="color:var(--warn)">' + d.medio + '</b><span>6.5 a 8.9</span></div>' +
+        '<div class="stat" style="background:var(--ok-bg)"><b style="color:var(--ok)">' + d.alto + '</b><span>9 o más</span></div></div></div>' : '') +
+      '</div>';
     html += '<div class="row" style="margin-bottom:8px"><p class="muted small grow" style="margin:0">Escribe los aciertos. Déjalo vacío si el alumno faltó al examen.</p><button class="btn" data-act="pegar-abrir" data-tipo="ex">📋 Pegar lista</button></div>';
     html += '<div class="list">' + alumnosActivos().map(function (a, i) {
       var v = X.valores[a.id];
@@ -385,17 +391,17 @@
 
   function conceptoPorClave(c) { return Calc.conceptos(S.data).filter(function (k) { return k.clave === c; })[0]; }
 
+  /** Fila 1: qué se captura (diagnóstico, examen del trimestre, disciplina, otros conceptos). Fila 2: la materia (solo en exámenes). */
   function chipsExamen(p) {
-    var X = S.ex, disc = X.campo === 'DISC' || String(X.campo).indexOf('K:') === 0;
-    return (disc ? '' : '<div class="chips" style="margin-bottom:8px">' +
-      '<button class="chip' + (X.tipo === 'diagnostico' ? ' active' : '') + '" data-act="ex-tipo" data-v="diagnostico">Diagnóstico</button>' +
-      '<button class="chip' + (X.tipo === 'trimestral' ? ' active' : '') + '" data-act="ex-tipo" data-v="trimestral">Examen ' + esc(p ? p.nombre : 'trimestral') + '</button></div>') +
-      '<div class="chips">' + CAMPOS().map(function (c) {
-        return '<button class="chip' + (c.id === X.campo ? ' active' : '') + '" data-act="ex-campo" data-v="' + c.id + '">' + c.nombre + '</button>';
-      }).join('') + '<button class="chip' + (X.campo === 'DISC' ? ' active' : '') + '" data-act="ex-campo" data-v="DISC">⭐ Disciplina</button>' +
-      Calc.conceptos(S.data).map(function (k) {
-        return '<button class="chip' + (X.campo === 'K:' + k.clave ? ' active' : '') + '" data-act="ex-campo" data-v="K:' + esc(k.clave) + '">🏷️ ' + esc(k.nombre) + '</button>';
-      }).join('') + '</div>';
+    var X = S.ex, otro = X.campo === 'DISC' || String(X.campo).indexOf('K:') === 0;
+    var chip = function (activo, act, v, texto) { return '<button class="chip' + (activo ? ' active' : '') + '" data-act="' + act + '" data-v="' + v + '">' + texto + '</button>'; };
+    return '<div class="chips" style="margin-bottom:8px">' +
+      chip(!otro && X.tipo === 'diagnostico', 'ex-tipo', 'diagnostico', 'Diagnóstico') +
+      chip(!otro && X.tipo === 'trimestral', 'ex-tipo', 'trimestral', 'Examen ' + esc(p ? p.nombre : 'trimestral')) +
+      chip(X.campo === 'DISC', 'ex-campo', 'DISC', '⭐ Disciplina') +
+      Calc.conceptos(S.data).map(function (k) { return chip(X.campo === 'K:' + k.clave, 'ex-campo', 'K:' + esc(k.clave), '🏷️ ' + esc(k.nombre)); }).join('') +
+      '</div>' +
+      (otro ? '' : '<div class="chips">' + CAMPOS().map(function (c) { return chip(c.id === X.campo, 'ex-campo', c.id, c.nombre); }).join('') + '</div>');
   }
 
   /** Captura de un concepto extra (participación, proyecto…). */
@@ -464,12 +470,18 @@
     var especiales = ['TODOS', 'GRAF', 'RIESGO'];
     var tab = especiales.indexOf(S.cal.tab) >= 0 ? S.cal.tab : (campoValido(S.cal.tab) === S.cal.tab ? S.cal.tab : 'TODOS');
     var enRiesgo = Calc.riesgo(S.data, p.id);
-    var html = '<div class="chips" style="margin-bottom:10px"><button class="chip' + (tab === 'TODOS' ? ' active' : '') + '" data-act="cal-tab" data-v="TODOS">Resumen</button>' +
+    var html = '<div class="chips" style="margin-bottom:8px"><button class="chip' + (tab === 'TODOS' ? ' active' : '') + '" data-act="cal-tab" data-v="TODOS">Resumen</button>' +
       '<button class="chip' + (tab === 'RIESGO' ? ' active' : '') + '" data-act="cal-tab" data-v="RIESGO">⚠️ En riesgo (' + enRiesgo.length + ')</button>' +
-      '<button class="chip' + (tab === 'GRAF' ? ' active' : '') + '" data-act="cal-tab" data-v="GRAF">📊 Gráficas</button>' +
-      CAMPOS().map(function (c) { return '<button class="chip' + (tab === c.id ? ' active' : '') + '" data-act="cal-tab" data-v="' + c.id + '">' + c.nombre + '</button>'; }).join('') + '</div>';
-    html += '<div class="muted small" style="margin-bottom:4px">Toca a un alumno para ver su resumen completo.</div>';
-    html += '<div class="muted small" style="margin-bottom:8px">' + esc(p.nombre) + ' · Examen ' + w.examen + '% · Trabajos ' + w.trabajos + '% · Asistencia ' + w.asistencia + '% · Disciplina ' + w.disciplina + '% · ' + R.posiblesAsis + ' días de clase</div>';
+      '<button class="chip' + (tab === 'GRAF' ? ' active' : '') + '" data-act="cal-tab" data-v="GRAF">📊 Gráficas</button></div>' +
+      '<div class="chips" style="margin-bottom:10px">' + CAMPOS().map(function (c) { return '<button class="chip' + (tab === c.id ? ' active' : '') + '" data-act="cal-tab" data-v="' + c.id + '">' + c.nombre + '</button>'; }).join('') + '</div>';
+    html += '<div class="row nowrap" style="margin-bottom:6px"><span class="muted small grow">Toca a un alumno para ver su resumen completo.</span>' +
+      '<button class="icon-btn info-btn' + (S.cal.info ? ' active' : '') + '" data-act="cal-info" title="Cómo se calcula" aria-label="Cómo se calcula">ⓘ</button></div>';
+    if (S.cal.info) {
+      html += '<div class="card small" style="padding:10px 12px"><b>' + esc(p.nombre) + '</b> · ' + R.posiblesAsis + ' días de clase<br>' +
+        'Cada materia: Examen ' + w.examen + '% · Trabajos ' + w.trabajos + '% · Asistencia ' + w.asistencia + '% · Disciplina ' + w.disciplina + '%' +
+        Calc.conceptos(S.data).map(function (k) { return ' · ' + esc(k.nombre) + ' ' + k.peso + '%'; }).join('') +
+        '<br><span class="muted">Rojo: menos de 6.5 · Amarillo: 6.5 a 8.9 · Verde: 9 o más. Se cambian en Más → Periodos y porcentajes.</span></div>';
+    }
 
     var sinDisc = w.disciplina > 0 ? R.alumnos.filter(function (f) { return f.disc.puntos == null; }).length : 0;
     if (sinDisc) html += '<div class="banner warn small">' + sinDisc + ' alumnos sin puntos de disciplina en este periodo (cuentan como 0). <a href="#" data-act="ir-disciplina">Capturar disciplina</a></div>';
@@ -585,6 +597,105 @@
     return html;
   }
 
+  // ===================== PDF del resumen =====================
+  // window.print() no funciona en la app instalada en la pantalla de inicio (sobre todo en iPhone),
+  // así que el PDF se genera en el propio celular y se comparte o descarga.
+  function cargarScript(src, global) {
+    if (window[global]) return Promise.resolve();
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = function () { rej(new Error('No se pudo cargar el generador de PDF. Revisa tu internet.')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  /** Convierte las gráficas SVG a imagen (html2canvas no dibuja bien los SVG). */
+  function svgsAImagen(el) {
+    var svgs = Array.prototype.slice.call(el.querySelectorAll('svg.viz'));
+    return Promise.all(svgs.map(function (svg) {
+      return new Promise(function (res) {
+        var w = Number(svg.getAttribute('width')) || 360, h = Number(svg.getAttribute('height')) || 200;
+        var img = new Image();
+        img.onload = function () {
+          var c = document.createElement('canvas'); c.width = w * 3; c.height = h * 3;
+          var ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+          var out = document.createElement('img'); out.src = c.toDataURL('image/png'); out.style.width = Math.min(w * 1.3, 470) + 'px'; out.style.display = 'block'; out.style.margin = '0 auto';
+          svg.parentNode.replaceChild(out, svg); res();
+        };
+        img.onerror = function () { res(); };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+      });
+    }));
+  }
+
+  /** Arma el PDF por bloques (tarjetas, tablas, títulos) para que ninguno se corte entre páginas. */
+  function construirPdf(el, nombreArchivo) {
+    var JsPDF = window.jspdf.jsPDF;
+    var pdf = new JsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait' });
+    var PW = pdf.internal.pageSize.getWidth(), PH = pdf.internal.pageSize.getHeight(), M = 12, CW = PW - 2 * M, GAP = 3;
+    var bloques = Array.prototype.filter.call(el.children, function (b) { return !b.hasAttribute('data-html2canvas-ignore') && b.offsetHeight > 0; });
+    var anchoBase = el.getBoundingClientRect().width;
+    var y = M, pagina = 1;
+    var pie = function () { pdf.setFontSize(8); pdf.setTextColor(140); pdf.text(nombreArchivo.replace(/_/g, ' ').replace(/\.pdf$/, '') + ' · pág. ' + pagina, M, PH - 6); };
+    var capturas = [];
+    return bloques.reduce(function (prom, b) {
+      return prom.then(function () {
+        return window.html2canvas(b, { scale: 2, backgroundColor: '#ffffff', logging: false }).then(function (c) { capturas.push({ el: b, c: c }); });
+      });
+    }, Promise.resolve()).then(function () {
+      capturas.forEach(function (cap, k) {
+        var w = CW * cap.el.getBoundingClientRect().width / anchoBase;
+        var h = cap.c.height * w / cap.c.width;
+        var alto = h;
+        // Un título nunca se queda solo al final de la página: se mide junto con el bloque que sigue
+        if (/^H[1-4]$/.test(cap.el.tagName) && capturas[k + 1]) {
+          var sig = capturas[k + 1], ws = CW * sig.el.getBoundingClientRect().width / anchoBase;
+          alto += GAP + Math.min(sig.c.height * ws / sig.c.width, PH - 2 * M - h - GAP);
+        }
+        if (y + alto > PH - M - 6 && y > M) { pie(); pdf.addPage(); pagina++; y = M; }
+        var maxH = PH - M - 6 - y;
+        if (h > maxH) { w = w * maxH / h; h = maxH; } // bloque más alto que una hoja: se reduce
+        pdf.addImage(cap.c.toDataURL('image/jpeg', 0.92), 'JPEG', M, y, w, h);
+        y += h + GAP;
+      });
+      pie();
+      return pdf.output('blob');
+    });
+  }
+
+  function pdfResumen(btn) {
+    var a = S.data.alumnos.filter(function (x) { return x.id === S.resumen.id; })[0];
+    var p = periodo();
+    var nombreArchivo = ('Resumen ' + a.nombre + ' ' + S.data.grupo.nombre + ' ' + (p ? p.nombre : '')).replace(/[^\wÁÉÍÓÚÑáéíóúñ ]+/g, '').trim().replace(/\s+/g, '_') + '.pdf';
+    var txt = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Generando…';
+    var el = document.getElementById('resumen-alumno');
+    var restaurar = function () { el.classList.remove('pdf-modo'); render(); };
+    Promise.all([
+      cargarScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js', 'jspdf'),
+      cargarScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', 'html2canvas')
+    ]).then(function () {
+      el.classList.add('pdf-modo');
+      return svgsAImagen(el);
+    }).then(function () {
+      return construirPdf(el, nombreArchivo);
+    }).then(function (blob) {
+      restaurar();
+      var file = null;
+      try { file = new File([blob], nombreArchivo, { type: 'application/pdf' }); } catch (e) { /* navegadores viejos */ }
+      var url = URL.createObjectURL(blob);
+      var puedeCompartir = file && navigator.canShare && navigator.canShare({ files: [file] });
+      openModal('<div class="row"><h2 class="grow">PDF listo</h2><button class="icon-btn" data-act="cerrar-modal">✕</button></div>' +
+        '<p class="muted small">' + esc(nombreArchivo) + '</p>' +
+        (puedeCompartir ? '<button class="btn primary block" id="pdf-compartir">📤 Compartir o guardar</button><p class="muted small" style="margin:6px 0 12px">Desde ahí puedes mandarlo por WhatsApp, guardarlo en Archivos o imprimirlo.</p>' : '') +
+        '<a class="btn block' + (puedeCompartir ? '' : ' primary') + '" style="text-align:center;text-decoration:none" href="' + url + '" download="' + esc(nombreArchivo) + '" target="_blank" rel="noopener">⬇ Descargar / abrir</a>');
+      var b = document.getElementById('pdf-compartir');
+      if (b) b.addEventListener('click', function () {
+        navigator.share({ files: [file], title: 'Resumen de ' + a.nombre }).catch(function (e) { if (e && e.name !== 'AbortError') toast('No se pudo compartir; usa Descargar', true); });
+      });
+    }).catch(function (e) { restaurar(); toast(e.message || 'No se pudo generar el PDF', true); });
+  }
+
   // ===================== Resumen de un alumno =====================
   function abrirResumen(id) {
     if (!confirmLeave()) return;
@@ -598,7 +709,7 @@
     if (!a) return '<div class="banner warn">Alumno no encontrado.</div>';
     var p = periodo(), w = S.data.grupo.pesos;
     var Z = Calc.resumenAlumno(S.data, a.id, S.periodoId);
-    var html = '<div class="row no-print" style="margin-bottom:8px"><button class="btn ghost" data-act="resumen-volver">‹ Volver</button><span class="grow"></span><button class="btn" data-act="imprimir">🖨 Imprimir / PDF</button></div>' +
+    var html = '<div class="row no-print" data-html2canvas-ignore="true" style="margin-bottom:8px"><button class="btn ghost" data-act="resumen-volver">‹ Volver</button><span class="grow"></span><button class="btn" data-act="resumen-pdf">📄 Guardar PDF</button></div>' +
       '<div class="card"><div class="muted small">' + esc(S.data.grupo.nombre) + (S.data.escuela ? ' · ' + esc(S.data.escuela.nombre) : '') + ' · Ciclo ' + esc(S.data.grupo.ciclo || '') + '</div>' +
       '<h2 style="margin:4px 0">' + esc(a.nombre) + '</h2><div class="muted small">' + (a.activo ? 'Número de lista ' + a.num : '<b>' + esc(ESTADO_ALUMNO[a.estado]) + '</b>' + (a.fechaBaja ? ' el ' + esc(fmtDate(a.fechaBaja)) : '') + (a.nota ? ' · ' + esc(a.nota) : '')) + '</div></div>';
     if (!a.activo) return html + '<div class="banner info">El alumno ya no está activo en el grupo; sus calificaciones no se calculan.</div>';
@@ -1161,8 +1272,13 @@
     },
 
     // Exámenes
-    'ex-tipo': function (el) { if (!confirmLeave()) return; S.ex.tipo = el.dataset.v; S.ex.key = null; render(); },
-    'ex-campo': function (el) { if (!confirmLeave()) return; S.ex.campo = el.dataset.v; S.ex.key = null; S.disc.key = null; S.pts.key = null; render(); },
+    'ex-tipo': function (el) {
+      if (!confirmLeave()) return;
+      var X = S.ex;
+      if (X.campo === 'DISC' || String(X.campo).indexOf('K:') === 0) X.campo = X.ultimaMateria || null;
+      X.tipo = el.dataset.v; X.key = null; render();
+    },
+    'ex-campo': function (el) { if (!confirmLeave()) return; if (S.ex.campo && S.ex.campo !== 'DISC' && String(S.ex.campo).indexOf('K:') !== 0) S.ex.ultimaMateria = S.ex.campo; S.ex.campo = el.dataset.v; S.ex.key = null; S.disc.key = null; S.pts.key = null; render(); },
     'ex-guardar': function (el) {
       var X = S.ex;
       if (!(Number(X.reactivos) > 0)) return toast('Escribe el número de reactivos', true);
@@ -1199,11 +1315,13 @@
     'ir-disciplina': function () { if (!confirmLeave()) return; S.view = 'examenes'; S.ex.campo = 'DISC'; S.disc.key = null; render(); window.scrollTo(0, 0); },
 
     // Calificaciones
+    'ex-info': function () { S.ex.info = !S.ex.info; render(); },
+    'cal-info': function () { S.cal.info = !S.cal.info; render(); },
     'cal-tab': function (el) { S.cal.tab = el.dataset.v; render(); window.scrollTo(0, 0); },
     'cal-detalle': function (el) { abrirResumen(el.dataset.id); },
     'resumen-abrir': function (el) { abrirResumen(el.dataset.id); },
     'resumen-volver': function () { var v = S.resumen && S.resumen.volver; S.view = v ? v.view : 'calificaciones'; S.mas = v ? v.mas : null; render(); },
-    imprimir: function () { window.print(); },
+    'resumen-pdf': function (el) { pdfResumen(el); },
     exportar: exportar,
 
     // Disciplina

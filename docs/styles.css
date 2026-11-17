@@ -141,3 +141,11 @@ tr.clickable { cursor: pointer; }
 .viz-sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .riesgo-motivo { display: inline-block; font-size: .74rem; padding: 2px 8px; border-radius: 999px; background: var(--bad-bg); color: var(--bad); margin: 3px 4px 0 0; }
 .riesgo-motivo.medio { background: var(--warn-bg); color: #8a5400; }
+
+.info-btn { width: 32px; height: 32px; font-size: 1rem; border-radius: 50%; }
+.info-btn.active { background: var(--brand); color: #fff; }
+
+/* Al generar el PDF: ancho de hoja y sin sombras */
+.pdf-modo { width: 720px; max-width: none; background: #fff; padding: 0; }
+.pdf-modo .card, .pdf-modo .table-wrap { box-shadow: none; border: 1px solid #e6e3f0; }
+.pdf-modo .table-wrap { overflow: visible; }
